@@ -1,0 +1,4 @@
+data: /nasa/drives/yaak/data
+rbyte:
+  cache: .rbyte_cache
+lerobot_stats: /nasa/drives/yaak/data/lerobot_metadata/dataset_stats_all_quantiles_flatten.json

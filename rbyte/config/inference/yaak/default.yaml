@@ -1,0 +1,7 @@
+# @package _global_
+
+defaults:
+  - /model: smolvla
+  - /datamodule: yaak/predict
+  - /paths: yaak/default
+  - _self_

@@ -1,0 +1,3 @@
+_target_: lerobot.scripts.eval_yaak.load_from_wandb_artifact
+artifact: yaak/lerobot/policy_smolvla-seed_1000-dataset_yaak-ai_L2D-334000:v0
+stats: ${paths.lerobot_stats}
