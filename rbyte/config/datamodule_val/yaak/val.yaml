@@ -1,5 +1,5 @@
 defaults:
-  - /dataset: yaak/val_small/val_clip
+  - /dataset: yaak/val_clip
   - _self_
 
 _target_: torch.utils.data.DataLoader

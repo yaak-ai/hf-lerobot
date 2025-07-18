@@ -1,6 +1,6 @@
 defaults:
-  - /dataset: yaak/train
-  # - /dataset: yaak/train_clip
+  # - /dataset: yaak/train
+  - /dataset: yaak/train_clip
   - _self_
 
 _target_: torch.utils.data.DataLoader

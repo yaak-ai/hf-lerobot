@@ -1,25 +1,15 @@
 # @package _global_
 
 defaults:
-# Non-clip values
-  # - /dataset: yaak/train
-  # # - /val_test: val
-  # # - /val: val
-  # - /predict_test: predict
-  # # - /rmind: train
-  # - /test: train
-
-# Clip values
-  # - /dataset: yaak/train_clip
-  # - /val_test: val_clip
-  # - /val: val_clip
-  # - /predict_test: predict_clip
-  # - /rmind: train
-  # - /test: train_clip
 
   - /datamodule: yaak/train
   - /datamodule_val: yaak/val
   - /paths: yaak/default
+  - /normalization: quantiles
+  - /model: smolvla_train
   - _self_
 
 embedding_dim: 512
+
+
+
