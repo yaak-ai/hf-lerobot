@@ -44,6 +44,13 @@ authors = [
     { name = "Martino Russi", email = "nopyeps@gmail.com"},
     { name = "Thomas Wolf", email = "thomaswolfcontact@gmail.com" },
 ]
+<<<<<<< HEAD
+=======
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = "==3.12.7"
+keywords = ["robotics", "deep learning", "pytorch"]
+>>>>>>> e4e22c72 (CONF rbyte local)
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -87,6 +94,8 @@ dependencies = [
     "flask>=3.0.3,<4.0.0",
     "imageio[ffmpeg]>=2.34.0,<3.0.0",
     "termcolor>=2.4.0,<4.0.0",
+    "duckdb>=1.2.2",
+    "rbyte[geo,jpeg,yaak] @ file:///nasa/team-space/nikita/wheels/rbyte-0.28.2-py3-none-any.whl",
 ]
 
 # Optional dependencies
@@ -108,10 +117,10 @@ hopejr = ["lerobot[feetech]", "lerobot[pygame-dep]"]
 lekiwi = ["lerobot[feetech]", "pyzmq>=26.2.1"]
 reachy2 = ["reachy2_sdk>=1.0.14"]
 kinematics = ["lerobot[placo-dep]"]
-intelrealsense = [
-    "pyrealsense2>=2.55.1.6486 ; sys_platform != 'darwin'",
-    "pyrealsense2-macosx>=2.54 ; sys_platform == 'darwin'",
-]
+# intelrealsense = [
+#     "pyrealsense2>=2.55.1.6486 ; sys_platform != 'darwin'",
+#     "pyrealsense2-macosx>=2.54 ; sys_platform == 'darwin'",
+# ]
 # stretch = [
 #     "hello-robot-stretch-body>=0.7.27 ; sys_platform == 'linux'",
 #     "pyrender @ git+https://github.com/mmatl/pyrender.git ; sys_platform == 'linux'",
