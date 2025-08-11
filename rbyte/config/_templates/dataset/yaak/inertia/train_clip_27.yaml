@@ -2,31 +2,27 @@
 
 
 #@ drives = [
-#@     'Niro104-HQ/2022-12-20--13-57-20',
+#@     'Niro101-HQ/2022-12-30--09-23-51',
 #@ ]
 
-#@ predict_drives = [
-#@     'Niro102-HQ/2022-12-03--11-30-20',
-#@     'Niro107-HQ/2023-05-12--12-05-15',
-#@     'Niro104-HQ/2022-12-20--13-57-20',
-#@     'Niro122-HQ/2023-04-05--12-06-39',
-#@     'Niro115-HQ/2023-05-16--10-47-33',
-#@ ]
-
-#@ train_drives = [
+#@ ok_drives = [
 #@     'Niro096-HQ/2023-01-11--13-47-36',
 #@     'Niro101-HQ/2022-12-25--09-58-33',
 #@     'Niro101-HQ/2022-12-30--09-23-51',
 #@     'Niro101-HQ/2022-12-31--09-57-24',
 #@     'Niro101-HQ/2023-01-01--09-31-43',
-#@     'Niro110-HQ/2023-06-05--16-48-04',
-#@     'Niro115-HQ/2023-06-06--07-32-50',
-#@     'Niro104-HQ/2022-12-31--09-45-39',
+#@     'Niro115-HQ/2023-05-16--10-47-33',
+#@     'Niro104-HQ/2022-12-20--13-57-20',
+#@     'Niro107-HQ/2023-05-12--12-05-15',
+#@     'Niro122-HQ/2023-04-05--12-06-39',
+#@     'Niro102-HQ/2022-12-03--11-30-20',
 #@ ]
+
 
 #@ cameras = [
 #@     'cam_front_left',
 #@ ]
+
 ---
 _target_: rbyte.Dataset
 _recursive_: false
@@ -342,7 +338,7 @@ samples:
         func:
           _target_: rbyte.io.DataFrameGroupByDynamic
           index_column: meta/ImageMetadata.(@=cameras[0]@)/frame_idx
-          every: 1i
+          every: 10i
           period: 101i
           closed: left
           gather_every: 1
@@ -357,12 +353,6 @@ samples:
         bound:
           query: |
             SELECT
-                "meta/VehicleMotion/gas_pedal_normalized"::FLOAT[101] AS "debug.gas",
-                "meta/VehicleMotion/speed"::FLOAT[101] AS "debug.speed",
-                "meta/VehicleMotion/brake_pedal_normalized"::FLOAT[101] AS "debug.brake",
-                "meta/VehicleMotion/steering_angle_normalized"::FLOAT[101] AS "debug.steering",
-                format('https://nutron.yaak.ai/dataset/session-logs/REPLACE_ME?offset={}', ("meta/VehicleMotion/offset_seconds")[1]) as "nutron",
-                ("meta/VehicleMotion/offset_reverse_seconds") AS "offset_reverse",
                 list_slice("meta/ImageMetadata.cam_front_left/time_stamp"::TIMESTAMP[101], 1, 60, 10) AS "meta/ImageMetadata.cam_front_left/time_stamp",
                 list_slice("meta/ImageMetadata.cam_front_left/frame_idx"::INT32[101], 1, 60, 10) AS "meta/ImageMetadata.cam_front_left/frame_idx",
                 list_slice("meta/VehicleMotion/speed"::FLOAT[101], 1, 60, 10) AS "observation.state.vehicle",
@@ -381,8 +371,4 @@ samples:
                     AND list_max(list_slice("meta/VehicleMotion/brake_pedal_normalized", 1, 60, 10)) <= (1.0 / 164 + 0.001)
                     AND list_max(list_slice("meta/VehicleMotion/speed", 1, 60, 10)) >= 25.0
                     AND ("meta/VehicleMotion/speed")[51] - ("meta/VehicleMotion/speed")[1] >= -0.05 * list_avg(list_slice("meta/VehicleMotion/speed", 1, 60, 10))
-                ) AND
-                list_max(list_slice("meta/VehicleMotion/brake_pedal_normalized", 1, 60, 10)) <= (1.0 / 164 + 0.001) AND
-                ("meta/VehicleMotion/brake_pedal_normalized")[52] > (1.0 / 164 + 0.001) AND
-                list_max(list_slice("meta/VehicleMotion/brake_pedal_normalized", 52, 101, 1)) > 0.1 AND
-                list_max(list_slice("meta/VehicleMotion/gas_pedal_normalized", 1, 51, 1)) > (1.0 / 255 + 0.001)
+                )  

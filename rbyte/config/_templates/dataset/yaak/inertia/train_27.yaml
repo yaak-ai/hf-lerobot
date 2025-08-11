@@ -1,27 +1,34 @@
 #@yaml/text-templated-strings
 
-
 #@ drives = [
-#@     'Niro104-HQ/2022-12-20--13-57-20',
-#@ ]
-
-#@ predict_drives = [
-#@     'Niro102-HQ/2022-12-03--11-30-20',
-#@     'Niro107-HQ/2023-05-12--12-05-15',
-#@     'Niro104-HQ/2022-12-20--13-57-20',
-#@     'Niro122-HQ/2023-04-05--12-06-39',
-#@     'Niro115-HQ/2023-05-16--10-47-33',
-#@ ]
-
-#@ train_drives = [
 #@     'Niro096-HQ/2023-01-11--13-47-36',
 #@     'Niro101-HQ/2022-12-25--09-58-33',
 #@     'Niro101-HQ/2022-12-30--09-23-51',
 #@     'Niro101-HQ/2022-12-31--09-57-24',
 #@     'Niro101-HQ/2023-01-01--09-31-43',
-#@     'Niro110-HQ/2023-06-05--16-48-04',
-#@     'Niro115-HQ/2023-06-06--07-32-50',
-#@     'Niro104-HQ/2022-12-31--09-45-39',
+#@     'Niro115-HQ/2023-05-16--10-47-33',
+#@     'Niro104-HQ/2022-12-20--13-57-20',
+#@     'Niro107-HQ/2023-05-12--12-05-15',
+#@     'Niro122-HQ/2023-04-05--12-06-39',
+#@     'Niro102-HQ/2022-12-03--11-30-20',
+#@     'G1-00428/2024-04-23--07-00-31',
+#@     'Niro104-HQ/2023-04-27--08-23-53',
+#@     'G1-00429/2024-04-22--13-35-09',
+#@     'G1-00436/2024-04-22--07-48-38',
+#@     'G1-00436/2024-04-22--15-59-18'
+#@ ]
+
+#@ ok_drives = [
+#@     'Niro096-HQ/2023-01-11--13-47-36',
+#@     'Niro101-HQ/2022-12-25--09-58-33',
+#@     'Niro101-HQ/2022-12-30--09-23-51',
+#@     'Niro101-HQ/2022-12-31--09-57-24',
+#@     'Niro101-HQ/2023-01-01--09-31-43',
+#@     'Niro115-HQ/2023-05-16--10-47-33',
+#@     'Niro104-HQ/2022-12-20--13-57-20',
+#@     'Niro107-HQ/2023-05-12--12-05-15',
+#@     'Niro122-HQ/2023-04-05--12-06-39',
+#@     'Niro102-HQ/2022-12-03--11-30-20',
 #@ ]
 
 #@ cameras = [
@@ -80,8 +87,8 @@ samples:
       - _target_: pipefunc.PipeFunc
         renames:
           path: yaak_metadata_path
-        output_name: meta_init
-        mapspec: "yaak_metadata_path[i] -> meta_init[i]"
+        output_name: meta
+        mapspec: "yaak_metadata_path[i] -> meta[i]"
         cache: true
         func:
           _target_: rbyte.io.YaakMetadataDataFrameBuilder
@@ -138,19 +145,6 @@ samples:
 
       - _target_: pipefunc.PipeFunc
         renames:
-          input: meta_init
-        output_name: meta
-        mapspec: "meta_init[i] -> meta[i]"
-        func:
-          _target_: rbyte2lerobot.io.MetadataAugmenter
-          columns:
-            time_stamp: "time_stamp"
-            offset_seconds: "offset_seconds"
-            offset_reverse_seconds: "offset_reverse_seconds"
-          df_key: "VehicleMotion"
-
-      - _target_: pipefunc.PipeFunc
-        renames:
           path: waypoints_path
         output_name: waypoints_raw
         mapspec: "waypoints_path[i] -> waypoints_raw[i]"
@@ -183,7 +177,6 @@ samples:
         func:
           _target_: pipefunc.helpers.collect_kwargs
           parameters: [meta, waypoints]
-
 
       - _target_: pipefunc.PipeFunc
         renames:
@@ -222,10 +215,6 @@ samples:
                   brake_pedal_normalized:
                     method: interp
                   steering_angle_normalized:
-                    method: interp
-                  offset_seconds:
-                    method: interp
-                  offset_reverse_seconds:
                     method: interp
                   gear:
                     method: asof
@@ -342,8 +331,8 @@ samples:
         func:
           _target_: rbyte.io.DataFrameGroupByDynamic
           index_column: meta/ImageMetadata.(@=cameras[0]@)/frame_idx
-          every: 1i
-          period: 101i
+          every: 10i
+          period: 60i
           closed: left
           gather_every: 1
 
@@ -357,32 +346,22 @@ samples:
         bound:
           query: |
             SELECT
-                "meta/VehicleMotion/gas_pedal_normalized"::FLOAT[101] AS "debug.gas",
-                "meta/VehicleMotion/speed"::FLOAT[101] AS "debug.speed",
-                "meta/VehicleMotion/brake_pedal_normalized"::FLOAT[101] AS "debug.brake",
-                "meta/VehicleMotion/steering_angle_normalized"::FLOAT[101] AS "debug.steering",
-                format('https://nutron.yaak.ai/dataset/session-logs/REPLACE_ME?offset={}', ("meta/VehicleMotion/offset_seconds")[1]) as "nutron",
-                ("meta/VehicleMotion/offset_reverse_seconds") AS "offset_reverse",
-                list_slice("meta/ImageMetadata.cam_front_left/time_stamp"::TIMESTAMP[101], 1, 60, 10) AS "meta/ImageMetadata.cam_front_left/time_stamp",
-                list_slice("meta/ImageMetadata.cam_front_left/frame_idx"::INT32[101], 1, 60, 10) AS "meta/ImageMetadata.cam_front_left/frame_idx",
-                list_slice("meta/VehicleMotion/speed"::FLOAT[101], 1, 60, 10) AS "observation.state.vehicle",
-                list_slice("meta/VehicleMotion/gas_pedal_normalized"::FLOAT[101],  52, 101, 1) AS "meta/VehicleMotion/gas_pedal_normalized",
-                list_slice("meta/VehicleMotion/brake_pedal_normalized"::FLOAT[101],  52, 101, 1) AS "meta/VehicleMotion/brake_pedal_normalized",
-                list_slice("meta/VehicleMotion/steering_angle_normalized"::FLOAT[101],  52, 101, 1) AS "meta/VehicleMotion/steering_angle_normalized",
-                flatten(("waypoints/waypoints_normalized"::FLOAT[2][10][101])[51]) AS "observation.state.waypoints",
+                list_first("meta/ImageMetadata.cam_front_left/time_stamp"::TIMESTAMP[60]) AS "meta/ImageMetadata.cam_front_left/time_stamp",
+                list_first("meta/ImageMetadata.cam_front_left/frame_idx"::INT32[60]) AS "meta/ImageMetadata.cam_front_left/frame_idx",
+                list_first("meta/VehicleMotion/speed"::FLOAT[60]) AS "observation.state.vehicle",
+                list_slice("meta/VehicleMotion/gas_pedal_normalized"::FLOAT[60], 2, 51, 1) AS "meta/VehicleMotion/gas_pedal_normalized",
+                list_slice("meta/VehicleMotion/brake_pedal_normalized"::FLOAT[60], 2, 51, 1) AS "meta/VehicleMotion/brake_pedal_normalized",
+                list_slice("meta/VehicleMotion/steering_angle_normalized"::FLOAT[60], 2, 51, 1) AS "meta/VehicleMotion/steering_angle_normalized",
+                flatten(list_first("waypoints/waypoints_normalized"::FLOAT[2][10][60])) AS "observation.state.waypoints",
                 'Given the waypoints and current vehicle speed, follow the waypoints while adhering to traffic rules and regulations' as "task"
             FROM
                 df
             WHERE
-                len("meta/ImageMetadata.cam_front_left/frame_idx") = 101
-                AND list_last("meta/ImageMetadata.cam_front_left/frame_idx") - list_first("meta/ImageMetadata.cam_front_left/frame_idx") == 100
+                len("meta/ImageMetadata.cam_front_left/frame_idx") = 60
+                AND list_last("meta/ImageMetadata.cam_front_left/frame_idx") - list_first("meta/ImageMetadata.cam_front_left/frame_idx") == 59
                 AND NOT (
-                    list_max(list_slice("meta/VehicleMotion/gas_pedal_normalized", 1, 60, 10)) <= (1.0 / 255 + 0.001)
-                    AND list_max(list_slice("meta/VehicleMotion/brake_pedal_normalized", 1, 60, 10)) <= (1.0 / 164 + 0.001)
-                    AND list_max(list_slice("meta/VehicleMotion/speed", 1, 60, 10)) >= 25.0
-                    AND ("meta/VehicleMotion/speed")[51] - ("meta/VehicleMotion/speed")[1] >= -0.05 * list_avg(list_slice("meta/VehicleMotion/speed", 1, 60, 10))
-                ) AND
-                list_max(list_slice("meta/VehicleMotion/brake_pedal_normalized", 1, 60, 10)) <= (1.0 / 164 + 0.001) AND
-                ("meta/VehicleMotion/brake_pedal_normalized")[52] > (1.0 / 164 + 0.001) AND
-                list_max(list_slice("meta/VehicleMotion/brake_pedal_normalized", 52, 101, 1)) > 0.1 AND
-                list_max(list_slice("meta/VehicleMotion/gas_pedal_normalized", 1, 51, 1)) > (1.0 / 255 + 0.001)
+                    list_max("meta/VehicleMotion/gas_pedal_normalized") <= (1.0 / 255 + 0.001)
+                    AND list_max("meta/VehicleMotion/brake_pedal_normalized") <= (1.0 / 164 + 0.001)
+                    AND list_max("meta/VehicleMotion/speed") >= 25.0
+                    AND list_last("meta/VehicleMotion/speed") - list_first("meta/VehicleMotion/speed") >= -0.05 * list_avg("meta/VehicleMotion/speed")
+                )
