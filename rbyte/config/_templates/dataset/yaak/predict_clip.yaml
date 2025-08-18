@@ -1,10 +1,10 @@
 #@yaml/text-templated-strings
 
-#@ small_drives = [
-#@     'Niro102-HQ/2022-12-03--11-30-20',
+#@ drives = [
+#@     'Niro096-HQ/2023-01-11--13-47-36',
 #@ ]
 
-#@ drives = [
+#@ all_drives = [
 #@     'Niro102-HQ/2022-12-03--11-30-20',
 #@     'Niro107-HQ/2023-05-12--12-05-15',
 #@     'Niro104-HQ/2022-12-20--13-57-20',
@@ -12,50 +12,51 @@
 #@     'Niro115-HQ/2023-05-16--10-47-33',
 #@ ]
 
-#@ cameras = [
-#@     'cam_front_left',
-#@ ]
 ---
 _target_: rbyte.Dataset
 _recursive_: false
 _convert_: all
+
 sources:
-  #@ for input_id in drives:
-  (@=input_id@):
-    #@ for camera in cameras:
-    (@=camera@):
-      index_column: "meta/ImageMetadata.(@=camera@)/frame_idx"
+  #@ for drive_id in drives:
+  (@=drive_id@):
+    cam_front_left:
+      index_column: "meta/ImageMetadata.cam_front_left/frame_idx"
       source:
         _target_: rbyte.io.PathTensorSource
-        path: "${paths.data}/(@=input_id@)/frames/(@=camera@).pii.mp4/576x324/{:09d}.jpg"
+        path: "${paths.data}/(@=drive_id@)/frames/cam_front_left.pii.mp4/576x324/{:09d}.jpg"
         decoder:
           _target_: simplejpeg.decode_jpeg
           _partial_: true
           colorspace: rgb
           fastdct: true
           fastupsample: true
-    #@ end
   #@ end
 
 samples:
   inputs:
-    #@ for input_id in drives:
-    (@=input_id@):
-      yaak_metadata_path: ${paths.data}/(@=input_id@)/metadata.log
-      waypoints_path: ${paths.data}/(@=input_id@)/waypoints.json
-      #@ for camera in cameras:
-      (@=camera@)_path: ${paths.data}/(@=input_id@)/frames/(@=camera@).pii.mp4/576x324
-      #@ end
+    #@ for drive_id in drives:
+    - input_id: (@=drive_id@)
+      yaak_metadata_path: ${paths.data}/(@=drive_id@)/metadata.log
+      waypoints_path: ${paths.data}/(@=drive_id@)/waypoints.json
+      cam_front_left_path: ${paths.data}/(@=drive_id@)/frames/cam_front_left.pii.mp4/576x324
     #@ end
 
   executor:
-    _target_: concurrent.futures.ProcessPoolExecutor
-    mp_context:
-      _target_: multiprocessing.get_context
-      method: forkserver
+    "":
+      _target_: concurrent.futures.ProcessPoolExecutor
+      mp_context:
+        _target_: multiprocessing.get_context
+        method: forkserver
 
-  storage: shared_memory_dict
+    cam_front_left_meta:
+      _target_: concurrent.futures.ThreadPoolExecutor
+
+  storage: file_array
+  run_folder: "outputs/dataset/yaak/val/samples"
+  # run_folder: "${hydra:run.dir}/dataset/yaak/val/samples"
   scheduling_strategy: eager
+  return_results: false
   persist_memory: false
 
   pipeline:
@@ -131,14 +132,13 @@ samples:
         mapspec: "waypoints_path[i] -> waypoints_raw[i]"
         func:
           _target_: rbyte.io.DuckDbDataFrameBuilder
-          udfs: [rbyte.io._duckdb.udfs.Wgs84ToUtm]
         bound:
           query: |
             LOAD spatial;
             SET TimeZone = 'UTC';
             SELECT TO_TIMESTAMP(timestamp)::TIMESTAMP AS timestamp,
                    heading,
-                   ST_Wgs84ToUtm(ST_AsWKB(geom)) AS geometry
+                   ST_AsWKB(ST_Transform(geom, 'EPSG:4326', 'EPSG:25832', always_xy := true)) AS geometry
             FROM ST_Read('{path}')
 
       - _target_: pipefunc.PipeFunc
@@ -154,82 +154,69 @@ samples:
             output: waypoints
 
       - _target_: pipefunc.PipeFunc
-        output_name: data
-        mapspec: "meta[i], waypoints[i] -> data[i]"
-        func:
-          _target_: pipefunc.helpers.collect_kwargs
-          parameters: [meta, waypoints]
-
-      - _target_: pipefunc.PipeFunc
-        renames:
-          input: data
         output_name: aligned
-        mapspec: "data[i] -> aligned[i]"
+        mapspec: "meta[i], waypoints[i] -> aligned[i]"
         func:
-          _target_: rbyte.io.DataFrameAligner
-          separator: /
-          fields:
-            meta:
-              ImageMetadata.(@=cameras[0]@):
-                key: time_stamp
-              #@ for camera in cameras[1:]:
-              ImageMetadata.(@=camera@):
-                key: time_stamp
+          _target_: makefun.create_function
+          func_signature: "align(*, meta, waypoints)"
+          func_impl:
+            _target_: rbyte.io.DataFrameAligner
+            separator: /
+            fields:
+              meta:
+                ImageMetadata.cam_front_left:
+                  key: time_stamp
+
+                VehicleState:
+                  key: time_stamp
+                  columns:
+                    turn_signal:
+                      method: asof
+                      tolerance: 100ms
+
+                VehicleMotion:
+                  key: time_stamp
+                  columns:
+                    speed:
+                      method: interp
+                    gas_pedal_normalized:
+                      method: interp
+                    brake_pedal_normalized:
+                      method: interp
+                    steering_angle_normalized:
+                      method: interp
+                    gear:
+                      method: asof
+                      tolerance: 100ms
+                      strategy: nearest
+
+                Gnss:
+                  key: time_stamp
+                  columns:
+                    latitude:
+                      method: asof
+                      tolerance: 500ms
+                      strategy: nearest
+                    longitude:
+                      method: asof
+                      tolerance: 500ms
+                      strategy: nearest
+
+              waypoints:
+                key: timestamp
                 columns:
-                  frame_idx:
+                  heading:
                     method: asof
-                    tolerance: 10ms
                     strategy: nearest
-              #@ end
-              VehicleState:
-                key: time_stamp
-                columns:
-                  turn_signal:
+                  waypoints:
                     method: asof
-                    tolerance: 100ms
-              VehicleMotion:
-                key: time_stamp
-                columns:
-                  speed:
-                    method: interp
-                  gas_pedal_normalized:
-                    method: interp
-                  brake_pedal_normalized:
-                    method: interp
-                  steering_angle_normalized:
-                    method: interp
-                  gear:
-                    method: asof
-                    tolerance: 100ms
-                    strategy: nearest
-              Gnss:
-                key: time_stamp
-                columns:
-                  latitude:
-                    method: asof
-                    tolerance: 500ms
-                    strategy: nearest
-                  longitude:
-                    method: asof
-                    tolerance: 500ms
                     strategy: nearest
 
-            waypoints:
-              key: timestamp
-              columns:
-                heading:
-                  method: asof
-                  strategy: nearest
-                waypoints:
-                  method: asof
-                  strategy: nearest
-
-      #@ for camera in cameras:
       - _target_: pipefunc.PipeFunc
         renames:
-          path: (@=camera@)_path
-        output_name: (@=camera@)_meta
-        mapspec: "(@=camera@)_path[i] -> (@=camera@)_meta[i]"
+          path: cam_front_left_path
+        output_name: cam_front_left_meta
+        mapspec: "cam_front_left_path[i] -> cam_front_left_meta[i]"
         cache: true
         func:
           _target_: rbyte.io.PathDataFrameBuilder
@@ -237,23 +224,16 @@ samples:
           fields:
             frame_idx:
               _target_: polars.Int32
-      #@ end
+
 
       - _target_: pipefunc.PipeFunc
-        output_name: query_context
-        mapspec: #@ ", ".join(["aligned[i]"] + ["{}_meta[i]".format(camera) for camera in cameras]) + " -> query_context[i]"
-        func:
-          _target_: pipefunc.helpers.collect_kwargs
-          parameters: #@ ["aligned"] + ["{}_meta".format(camera) for camera in cameras]
-
-      - _target_: pipefunc.PipeFunc
-        renames:
-          context: query_context
         output_name: filtered
-        mapspec: "query_context[i] -> filtered[i]"
+        mapspec: "aligned[i], cam_front_left_meta[i] -> filtered[i]"
         func:
-          _target_: rbyte.io.DataFrameDuckDbQuery
-          udfs: [rbyte.io._duckdb.udfs.Wgs84ToUtm]
+          _target_: makefun.create_function
+          func_signature: "df_query(*, query, aligned, cam_front_left_meta)"
+          func_impl:
+            _target_: rbyte.io.DataFrameDuckDbQuery
         bound:
           query: |
             LOAD spatial;
@@ -261,14 +241,10 @@ samples:
               base_data AS (
                 SELECT
                   *,
-                  ST_GeomFromWKB(ST_Wgs84ToUtm(
-                    ST_AsWKB(
-                      ST_Point(
-                        "meta/Gnss/longitude",
-                        "meta/Gnss/latitude"
-                      )
-                    )
-                  )) AS ego_geom,
+                  ST_Transform(
+                    ST_Point("meta/Gnss/longitude", "meta/Gnss/latitude"),
+                    'EPSG:4326', 'EPSG:25832', always_xy := true
+                  ) AS ego_geom,
                   ST_GeomFromWKB("waypoints/waypoints") AS waypoints_geom
                 FROM
                   aligned
@@ -330,19 +306,20 @@ samples:
         mapspec: "filtered[i] -> samples[i]"
         func:
           _target_: rbyte.io.DataFrameGroupByDynamic
-          index_column: meta/ImageMetadata.(@=cameras[0]@)/frame_idx
+          index_column: meta/ImageMetadata.cam_front_left/frame_idx
           every: 10i
           period: 101i
           closed: left
           gather_every: 1
 
       - _target_: pipefunc.PipeFunc
-        renames:
-          df: samples
         output_name: samples_cast
         mapspec: "samples[i] -> samples_cast[i]"
         func:
-          _target_: rbyte.io.DataFrameDuckDbQuery
+          _target_: makefun.create_function
+          func_signature: "df_query(*, query, samples)"
+          func_impl:
+            _target_: rbyte.io.DataFrameDuckDbQuery
         bound:
           query: |
             SELECT
@@ -358,7 +335,7 @@ samples:
                 ) AS "observation.state.waypoints",
                 'Given the waypoints and current vehicle heading and speed, follow the waypoints while adhering to traffic rules and regulations' as "task"
             FROM
-                df
+                samples
             WHERE
                 len("meta/ImageMetadata.cam_front_left/frame_idx") = 101
                 AND list_last("meta/ImageMetadata.cam_front_left/frame_idx") - list_first("meta/ImageMetadata.cam_front_left/frame_idx") == 100
@@ -368,3 +345,12 @@ samples:
                     AND list_max(list_slice("meta/VehicleMotion/speed", 1, 60, 10)) >= 25.0
                     AND ("meta/VehicleMotion/speed")[51] - ("meta/VehicleMotion/speed")[1] >= -0.05 * list_avg(list_slice("meta/VehicleMotion/speed", 1, 60, 10))
                 )  
+
+      - _target_: pipefunc.PipeFunc
+        renames:
+          keys: input_id
+          values: samples_cast
+        output_name: samples_aggregated
+        func:
+          _target_: rbyte.io.DataFrameConcater
+          key_column: __input_id
