@@ -3,7 +3,6 @@
 #@ drives = [
 #@     'Niro096-HQ/2023-01-11--13-47-36',
 #@     'Niro115-HQ/2023-05-16--10-47-33',
-#@     'Niro102-HQ/2022-12-03--11-30-20',
 #@     'G1-00428/2024-04-23--07-00-31',
 #@ ]
 
@@ -57,8 +56,8 @@ samples:
       _target_: concurrent.futures.ThreadPoolExecutor
 
   storage: file_array
-  run_folder: "outputs/dataset/yaak/predict/samples"
-  # run_folder: "${hydra:run.dir}/dataset/yaak/val/samples"
+  run_folder: "outputs/dataset/yaak/train/samples"
+  # run_folder: "${hydra:run.dir}/dataset/yaak/train/samples"
   scheduling_strategy: eager
   return_results: false
   persist_memory: false
@@ -155,7 +154,7 @@ samples:
           length: 10
           columns:
             points: geometry
-            output: waypoints
+            output: xy
 
       - _target_: pipefunc.PipeFunc
         output_name: aligned
@@ -212,7 +211,7 @@ samples:
                   heading:
                     method: asof
                     strategy: nearest
-                  waypoints:
+                  xy:
                     method: asof
                     strategy: nearest
 
@@ -249,7 +248,7 @@ samples:
                     ST_Point("meta/Gnss/longitude", "meta/Gnss/latitude"),
                     'EPSG:4326', 'EPSG:25832', always_xy := true
                   ) AS ego_geom,
-                  ST_GeomFromWKB("waypoints/waypoints") AS waypoints_geom
+                  ST_GeomFromWKB("waypoints/xy") AS waypoints_geom
                 FROM
                   aligned
                   SEMI JOIN cam_front_left_meta
@@ -266,14 +265,12 @@ samples:
               normalized_geometries AS (
                 SELECT
                   *,
-                  ST_Rotate(
                     ST_Translate(
                       waypoints_geom,
                       - ST_X(ego_geom),
                       - ST_Y(ego_geom)
-                    ),
-                    radians("waypoints/heading")
-                  ) AS normalized_waypoints_geom
+                    )
+                    AS normalized_waypoints_geom
                 FROM
                   base_data
               )
@@ -281,8 +278,25 @@ samples:
               * EXCLUDE (
                 "meta/VehicleMotion/gear",
                 waypoints_geom,
-                normalized_waypoints_geom
+                normalized_waypoints_geom,
+                ego_geom,
+                "waypoints/xy",
+                "waypoints/heading"
               ),
+              [
+                ST_X(ego_geom),
+                ST_Y(ego_geom)
+              ] AS "meta/Gnss/xy",
+                (
+                SELECT
+                  list(
+                    [ST_X(p.point_struct.geom), ST_Y(p.point_struct.geom)]
+                    ORDER BY
+                      p.point_struct.path
+                  )
+                FROM
+                  UNNEST(ST_Dump(waypoints_geom)) AS p(point_struct)
+              ) AS "waypoints/xy",
               (
                 SELECT
                   list(
@@ -292,7 +306,7 @@ samples:
                   )
                 FROM
                   UNNEST(ST_Dump(normalized_waypoints_geom)) AS p(point_struct)
-              ) AS "waypoints/waypoints_normalized"
+              ) AS "waypoints/xy_normalized"
             FROM
               normalized_geometries
             WHERE
@@ -312,7 +326,7 @@ samples:
           _target_: rbyte.io.DataFrameGroupByDynamic
           index_column: meta/ImageMetadata.cam_front_left/frame_idx
           every: 10i
-          period: 102i
+          period: 101i
           closed: left
           gather_every: 1
 
@@ -327,22 +341,19 @@ samples:
         bound:
           query: |
             SELECT
-                list_slice("meta/ImageMetadata.cam_front_left/time_stamp"::TIMESTAMP[102], 1, 60, 10) AS "meta/ImageMetadata.cam_front_left/time_stamp",
-                list_slice("meta/ImageMetadata.cam_front_left/frame_idx"::INT32[102], 1, 60, 10) AS "meta/ImageMetadata.cam_front_left/frame_idx",
-                list_slice("meta/VehicleMotion/speed"::FLOAT[102], 1, 60, 10) AS "observation.state.vehicle",
-                list_slice("meta/VehicleMotion/gas_pedal_normalized"::FLOAT[102],  52, 102, 10) AS "meta/VehicleMotion/gas_pedal_normalized",
-                list_slice("meta/VehicleMotion/brake_pedal_normalized"::FLOAT[102],  52, 102, 10) AS "meta/VehicleMotion/brake_pedal_normalized",
-                list_slice("meta/VehicleMotion/steering_angle_normalized"::FLOAT[102],  52, 102, 10) AS "meta/VehicleMotion/steering_angle_normalized",
-                list_cat(
-                    flatten(("waypoints/waypoints_normalized"::FLOAT[2][10][102])[51]),
-                    [sin(radians(("waypoints/heading"::FLOAT[102])[51])), cos(radians(("waypoints/heading"::FLOAT[102])[51]))]
-                ) AS "observation.state.waypoints",
-                'Given the waypoints and current vehicle heading and speed, follow the waypoints while adhering to traffic rules and regulations' as "task"
+                list_slice("meta/ImageMetadata.cam_front_left/time_stamp"::TIMESTAMP[101], 1, 60, 10) AS "meta/ImageMetadata.cam_front_left/time_stamp",
+                list_slice("meta/ImageMetadata.cam_front_left/frame_idx"::INT32[101], 1, 60, 10) AS "meta/ImageMetadata.cam_front_left/frame_idx",
+                list_slice("meta/VehicleMotion/speed"::FLOAT[101], 1, 60, 10) AS "observation.state.vehicle",
+                list_slice("meta/VehicleMotion/gas_pedal_normalized"::FLOAT[101],  52, 101, 1) AS "meta/VehicleMotion/gas_pedal_normalized",
+                list_slice("meta/VehicleMotion/brake_pedal_normalized"::FLOAT[101],  52, 101, 1) AS "meta/VehicleMotion/brake_pedal_normalized",
+                list_slice("meta/VehicleMotion/steering_angle_normalized"::FLOAT[101],  52, 101, 1) AS "meta/VehicleMotion/steering_angle_normalized",
+                flatten(("waypoints/xy_normalized"::FLOAT[2][10][101])[51]) AS "observation.state.waypoints",
+                'Given the waypoints and current vehicle speed, follow the waypoints while adhering to traffic rules and regulations' as "task"
             FROM
                 samples
             WHERE
-                len("meta/ImageMetadata.cam_front_left/frame_idx") = 102
-                AND list_last("meta/ImageMetadata.cam_front_left/frame_idx") - list_first("meta/ImageMetadata.cam_front_left/frame_idx") == 101
+                len("meta/ImageMetadata.cam_front_left/frame_idx") = 101
+                AND list_last("meta/ImageMetadata.cam_front_left/frame_idx") - list_first("meta/ImageMetadata.cam_front_left/frame_idx") == 100
                 AND NOT (
                     list_max(list_slice("meta/VehicleMotion/gas_pedal_normalized", 1, 60, 10)) <= (1.0 / 255 + 0.001)
                     AND list_max(list_slice("meta/VehicleMotion/brake_pedal_normalized", 1, 60, 10)) <= (1.0 / 164 + 0.001)

@@ -6,34 +6,34 @@ prefix_length: 0
 pad_language_to: "max_length"
 num_vlm_layers: 16
 # Training params
-optimizer_lr: 5e-5
+# factor of 2.5 reduction in learning rate
+optimizer_lr: 2e-05
 optimizer_betas: 
   - 0.9
   - 0.95
 optimizer_weight_decay: 1e-10
 optimizer_grad_clip_norm: 10.0
-scheduler_decay_lr: 1.25E-6
-scheduler_warmup_steps: 33400
-scheduler_decay_steps: 1002000
-steps: 668000
+scheduler_decay_lr: 5e-07
+scheduler_warmup_steps: 83500
+scheduler_decay_steps: 2505000
+steps: 1670000
 batch_size: 32
 # Architecture params
 ## Architecture suffix params: horizon
 chunk_size: 50
 n_action_steps: 50
 ## Architecture prefix params: clip
-use_separate_intent: True
+use_separate_intent: False
 max_action_dim: 32
 max_state_dim: 32
 max_intent_dim: 32
 use_image_norm: 1
 use_context: True
-freeze_vision_encoder: True
+freeze_vision_encoder: False
 # Loss params
 use_masked_loss: False
 use_acc_loss: False
 # Logging params
 log_freq: 50
-eval_freq: 10000
-train_run: train_smolvla_rmind_waypoints+speed_chunk_6_separate_pfa_loss32
-
+eval_freq: 20000
+train_run: train_smolvla_rbyte_waypoints_heading_speed

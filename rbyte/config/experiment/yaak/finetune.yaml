@@ -5,7 +5,7 @@ defaults:
   - /datamodule: yaak/train
   - /datamodule_val: yaak/val
   - /paths: yaak/default
-  - /normalization: quantiles
+  - /normalization: original
   - /model: smolvla_train
   - _self_
 
