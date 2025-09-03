@@ -58,6 +58,7 @@ from transformers.cache_utils import HybridCache, StaticCache
 from transformers.models.auto import CONFIG_MAPPING
 
 from lerobot.constants import ACTION, OBS_STATE
+# from lerobot.constants_yaak import ACTION, OBS_STATE
 from lerobot.policies.normalize import Normalize, Unnormalize
 from lerobot.policies.pi0fast.configuration_pi0fast import PI0FASTConfig
 from lerobot.policies.pretrained import PreTrainedPolicy
@@ -445,6 +446,7 @@ class PI0FAST(nn.Module):
             model_type="paligemma",
             pad_token_id=0,
             projection_dim=2048,
+            ignore_index=-100,
             text_config={
                 "hidden_activation": "gelu_pytorch_tanh",
                 "hidden_size": 2048,
@@ -505,7 +507,7 @@ class PI0FAST(nn.Module):
                     params.requires_grad = False
 
     def embed_tokens(self, tokens: torch.Tensor):
-        return self.pi0_paligemma.language_model.model.embed_tokens(tokens)
+        return self.pi0_paligemma.model.language_model.embed_tokens(tokens)
 
     def prepare_inputs_for_generation(self, *args, **kwargs):
         return self.pi0_paligemma.prepare_inputs_for_generation(*args, **kwargs)

@@ -29,7 +29,7 @@ version = "0.3.4"
 description = "🤗 LeRobot: State-of-the-art Machine Learning for Real-World Robotics in Pytorch"
 readme = "README.md"
 license = { text = "Apache-2.0" }
-requires-python = ">=3.10"
+requires-python = ">=3.12,<3.13" # verison bump required for rbyte
 authors = [
     { name = "Rémi Cadène", email = "re.cadene@gmail.com" },
     { name = "Simon Alibert", email = "alibert.sim@gmail.com" },
@@ -44,13 +44,6 @@ authors = [
     { name = "Martino Russi", email = "nopyeps@gmail.com"},
     { name = "Thomas Wolf", email = "thomaswolfcontact@gmail.com" },
 ]
-<<<<<<< HEAD
-=======
-readme = "README.md"
-license = { text = "Apache-2.0" }
-requires-python = "==3.12.7"
-keywords = ["robotics", "deep learning", "pytorch"]
->>>>>>> e4e22c72 (CONF rbyte local)
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -95,7 +88,8 @@ dependencies = [
     "imageio[ffmpeg]>=2.34.0,<3.0.0",
     "termcolor>=2.4.0,<4.0.0",
     "duckdb>=1.2.2",
-    "rbyte[geo,jpeg,yaak] @ file:///nasa/team-space/nikita/wheels/rbyte-0.28.2-py3-none-any.whl",
+    "rbyte[geo,jpeg,yaak]==0.30.0",
+    "matplotlib"
 ]
 
 # Optional dependencies

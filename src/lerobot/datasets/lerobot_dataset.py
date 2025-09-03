@@ -76,7 +76,7 @@ from lerobot.datasets.video_utils import (
 CODEBASE_VERSION = "v2.1"
 
 
-class LeRobotDatasetMetadata:
+class LeRobotDatasetMetadata:  # noqa: PLR0904
     def __init__(
         self,
         repo_id: str,
@@ -327,7 +327,7 @@ class LeRobotDatasetMetadata:
         return obj
 
 
-class LeRobotDataset(torch.utils.data.Dataset):
+class LeRobotDataset(torch.utils.data.Dataset):  # noqa: PLR0904
     def __init__(
         self,
         repo_id: str,

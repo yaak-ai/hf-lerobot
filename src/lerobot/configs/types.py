@@ -30,6 +30,7 @@ class NormalizationMode(str, Enum):
     MIN_MAX = "MIN_MAX"
     MEAN_STD = "MEAN_STD"
     IDENTITY = "IDENTITY"
+    ZERO_ONE = "ZERO_ONE"
 
 
 class DictLike(Protocol):

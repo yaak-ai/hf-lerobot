@@ -52,7 +52,7 @@ policy = SmolVLAPolicy.from_pretrained("lerobot/smolvla_base")
 
 """
 
-import math
+import math  # noqa: I001
 import os
 import re
 from collections import deque
@@ -63,18 +63,22 @@ import torch.nn.functional as F  # noqa: N812
 from torch import Tensor, nn
 from transformers import AutoProcessor
 
-from lerobot.constants import ACTION, OBS_STATE
+# To run on original LeRobot datasets, uncomment the line below
+# from lerobot.constants import ACTION, OBS_STATE  # noqa: ERA001
+from lerobot.constants_yaak import ACTION, OBS_STATE, OBS_STATE_VEHICLE
 from lerobot.policies.normalize import (
     Normalize,
     Unnormalize,
 )
 from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.policies.smolvla.configuration_smolvla import SmolVLAConfig
+from lerobot.policies.smolvla.conversion_utils_yaak import merge_waypoints_speed_as_state
 from lerobot.policies.smolvla.smolvlm_with_expert import SmolVLMWithExpertModel
 from lerobot.policies.utils import (
     populate_queues,
 )
 from lerobot.utils.utils import get_safe_dtype
+from lerobot.utils.wandb_utils_yaak import tracking_callback
 
 # Matches ".soNNN", optionally followed by "-something", up to the "_buffer_" marker
 _VARIANT_RE = re.compile(r"\.so\d+(?:-[\w]+)?_buffer_")
@@ -350,6 +354,13 @@ class SmolVLAPolicy(PreTrainedPolicy):
         self.language_tokenizer = AutoProcessor.from_pretrained(self.config.vlm_model_name).tokenizer
         self.model = VLAFlowMatching(config)
         self.reset()
+        # Addtional Yaak options: added to maintain compatibilty with the old code
+        # where config attributes are not present
+        self.use_context = False if not hasattr(self.config, "use_context") else self.config.use_context
+        self.use_separate_intent = False if not hasattr(self.config, "use_separate_intent") else self.config.use_separate_intent
+        self.use_image_norm = 1 if not hasattr(self.config, "use_image_norm") else self.config.use_image_norm
+        self.use_masked_loss = False if not hasattr(self.config, "use_masked_loss") else self.config.use_masked_loss
+        self.use_acc_loss = False if not hasattr(self.config, "use_acc_loss") else self.config.use_acc_loss
 
     def reset(self):
         """This should be called whenever the environment is reset."""
@@ -384,11 +395,11 @@ class SmolVLAPolicy(PreTrainedPolicy):
         # that why without the k != ACTION check, it will raise an error because we are trying to stack
         # on an empty container.
         for k in batch:
-            if k in self._queues and k != ACTION:
-                batch[k] = torch.stack(list(self._queues[k]), dim=1)
+            if k in self._queues:
+                batch[k] = torch.stack(list(self._queues[k]), dim=1) if len(self._queues[k]) > 0 else batch[k]
 
-        images, img_masks = self.prepare_images(batch)
-        state = self.prepare_state(batch)
+        images, img_masks = self.prepare_images(batch) if not self.use_context else self.prepare_images_context(batch)
+        state = self.prepare_state(batch) if not self.use_context else self.prepare_state_context(batch)
         lang_tokens, lang_masks = self.prepare_language(batch)
 
         actions = self.model.sample_actions(images, img_masks, lang_tokens, lang_masks, state, noise=noise)
@@ -452,11 +463,11 @@ class SmolVLAPolicy(PreTrainedPolicy):
             batch[ACTION] = self._pi_aloha_encode_actions_inv(batch[ACTION])
         batch = self.normalize_inputs(batch)
         batch = self.normalize_targets(batch)
-        images, img_masks = self.prepare_images(batch)
-        state = self.prepare_state(batch)
+        images, img_masks = self.prepare_images(batch) if not self.use_context else self.prepare_images_context(batch)
+        state = self.prepare_state(batch) if not self.use_context else self.prepare_state_context(batch)
         lang_tokens, lang_masks = self.prepare_language(batch)
         actions = self.prepare_action(batch)
-        actions_is_pad = batch.get("actions_id_pad")
+        actions_is_pad = batch.get(f"{ACTION}_id_pad")
         loss_dict = {}
         losses = self.model.forward(images, img_masks, lang_tokens, lang_masks, state, actions, noise, time)
         loss_dict["losses_after_forward"] = losses.clone()
@@ -467,14 +478,69 @@ class SmolVLAPolicy(PreTrainedPolicy):
             loss_dict["losses_after_in_ep_bound"] = losses.clone()
 
         # Remove padding
-        losses = losses[:, :, : self.config.max_action_dim]
+        orig_action_dim = self.config.action_feature.shape[0]
+        if self.use_masked_loss:
+            losses = losses[:, :, : orig_action_dim]
+        else:
+            losses = losses[:, :, : self.config.max_action_dim]
         loss_dict["losses_after_rm_padding"] = losses.clone()
+
+        # Has to be run before the losses.mean() call
+        tracking_callback(loss_dict, losses[..., :orig_action_dim], actions[:, :, : orig_action_dim], mode="train" if self.training else "eval")  # noqa: E501
 
         # For backward pass
         loss = losses.mean()
         # For backward pass
         loss_dict["loss"] = loss.item()
         return loss, loss_dict
+
+
+    def prepare_images_context(self, batch):
+        """Apply SmolVLA preprocessing to the images, like resizing to 224x224 and padding to keep aspect ratio, and
+        convert pixel range from [0.0, 1.0] to [-1.0, 1.0] as requested by SigLIP.
+        """
+        images = []
+        img_masks = []
+        present_img_keys = [key for key in self.config.image_features if key in batch]
+        missing_img_keys = [key for key in self.config.image_features if key not in batch]
+
+        if len(present_img_keys) == 0:
+            raise ValueError(
+                f"All image features are missing from the batch. At least one expected. (batch: {batch.keys()}) (image_features:{self.config.image_features})"
+            )
+        # Preprocess image features present in the batch
+        key = present_img_keys[0]
+        # Add each image in the context, not just the last one
+        context_length = batch[key].shape[1] if batch[key].ndim == 5 else 1
+        for i in range(context_length):
+            for key in present_img_keys:
+                img = batch[key][:, i, :, :, :] if batch[key].ndim == 5 else batch[key]
+                if self.config.resize_imgs_with_padding is not None:
+                    img = resize_with_pad(img, *self.config.resize_imgs_with_padding, pad_value=0)
+
+                # Normalize from range [0,1] to [-1,1] as expacted by siglip
+                img = img * 2.0 - 1.0
+
+                bsize = img.shape[0]
+                device = img.device
+                if f"{key}_padding_mask" in batch:
+                    mask = batch[f"{key}_padding_mask"].bool()
+                else:
+                    mask = torch.ones(bsize, dtype=torch.bool, device=device)
+                images.append(img)
+                img_masks.append(mask)
+
+        # Create image features not present in the batch
+        # as fully 0 padded images.
+        for num_empty_cameras in range(len(missing_img_keys)):
+            if num_empty_cameras >= self.config.empty_cameras:
+                break
+            img = torch.ones_like(img) * -1
+            mask = torch.zeros_like(mask)
+            images.append(img)
+            img_masks.append(mask)
+        return images, img_masks
+
 
     def prepare_images(self, batch):
         """Apply SmolVLA preprocessing to the images, like resizing to 224x224 and padding to keep aspect ratio, and
@@ -569,9 +635,32 @@ class SmolVLAPolicy(PreTrainedPolicy):
             actions[:, :, motor_idx] = aloha_gripper_from_angular_inv(actions[:, :, motor_idx])
         return actions
 
+    def prepare_state_context(self, batch):
+        """Pad state"""
+        if self.use_separate_intent:
+            # based on text instruction, waypoints are encoded 1st -> they are called OBS_STATE
+            # to be consistent with the original code base
+            intent = pad_vector(batch[OBS_STATE], self.config.max_intent_dim)
+            # speed is called OBS_STATE_VEHICLE
+            state = pad_vector(batch[OBS_STATE_VEHICLE], self.config.max_state_dim)
+            return (intent, state)  # noqa: DOC201
+
+        state = merge_waypoints_speed_as_state(batch, OBS_STATE)
+        state = pad_vector(state, self.config.max_state_dim)
+        return state
+
     def prepare_state(self, batch):
         """Pad state"""
-        state = batch[OBS_STATE][:, -1, :] if batch[OBS_STATE].ndim > 2 else batch[OBS_STATE]
+        if self.use_separate_intent:
+            intent = batch[OBS_STATE][:, -1, :] if batch[OBS_STATE].ndim > 2 else batch[OBS_STATE]
+            intent = pad_vector(intent, self.config.max_intent_dim)
+
+            state = batch[OBS_STATE_VEHICLE][:, -1, :] if batch[OBS_STATE_VEHICLE].ndim > 2 else batch[OBS_STATE_VEHICLE]
+            state = pad_vector(state, self.config.max_state_dim)
+            return (intent, state)  # noqa: DOC201
+
+        state = merge_waypoints_speed_as_state(batch, OBS_STATE)
+        state = state[:, -1, :] if state.ndim > 2 else state
         state = pad_vector(state, self.config.max_state_dim)
         return state
 
@@ -648,6 +737,12 @@ class VLAFlowMatching(nn.Module):
         self.state_proj = nn.Linear(
             self.config.max_state_dim, self.vlm_with_expert.config.text_config.hidden_size
         )
+        # Needs to ne initialized here (not at the end) because of set_requires_grad
+        self.use_separate_intent = False if not hasattr(self.config, "use_separate_intent") else self.config.use_separate_intent
+        self.intent_proj = nn.Linear(
+            self.config.max_intent_dim, self.vlm_with_expert.config.text_config.hidden_size
+        ) if self.use_separate_intent else None
+
         self.action_in_proj = nn.Linear(self.config.max_action_dim, self.vlm_with_expert.expert_hidden_size)
         self.action_out_proj = nn.Linear(self.vlm_with_expert.expert_hidden_size, self.config.max_action_dim)
 
@@ -668,10 +763,18 @@ class VLAFlowMatching(nn.Module):
         self.add_image_special_tokens = self.config.add_image_special_tokens
         self.image_end_token = torch.tensor([self.fake_image_token], dtype=torch.long)
         self.prefix_length = self.config.prefix_length
+        # Used in the `embed_prefix` method
+        self.use_context = False if not hasattr(self.config, "use_context") else self.config.use_context
+        self.use_image_norm = 1 if not hasattr(self.config, "use_image_norm") else self.config.use_image_norm
+        self.use_masked_loss = False if not hasattr(self.config, "use_masked_loss") else self.config.use_masked_loss
+        self.use_acc_loss = False if not hasattr(self.config, "use_acc_loss") else self.config.use_acc_loss
 
     def set_requires_grad(self):
         for params in self.state_proj.parameters():
             params.requires_grad = self.config.train_state_proj
+        if self.use_separate_intent:
+            for params in self.intent_proj.parameters():
+                params.requires_grad = self.config.train_state_proj
 
     def sample_noise(self, shape, device):
         noise = torch.normal(
@@ -722,7 +825,11 @@ class VLAFlowMatching(nn.Module):
 
             # Normalize image embeddings
             img_emb_dim = img_emb.shape[-1]
-            img_emb = img_emb * torch.tensor(img_emb_dim**0.5, dtype=img_emb.dtype, device=img_emb.device)
+            if self.use_image_norm == 1:
+                # Default behaviour
+                img_emb = img_emb * torch.tensor(img_emb_dim**0.5, dtype=img_emb.dtype, device=img_emb.device)
+            elif self.use_image_norm == 2:
+                img_emb = torch.nn.functional.normalize(img_emb, p=2, dim=-1)
 
             bsize, num_img_embs = img_emb.shape[:2]
             img_mask = img_mask[:, None].expand(bsize, num_img_embs)
@@ -756,7 +863,7 @@ class VLAFlowMatching(nn.Module):
         num_lang_embs = lang_emb.shape[1]
         att_masks += [0] * num_lang_embs
 
-        state_emb = self.state_proj(state)
+        state_emb = self.state_proj(state) if not self.use_separate_intent else torch.cat([self.intent_proj(state[0]), self.state_proj(state[1])], axis=1)
         state_emb = state_emb[:, None, :] if state_emb.ndim == 2 else state_emb
         embs.append(state_emb)
         bsize = state_emb.shape[0]
@@ -862,12 +969,20 @@ class VLAFlowMatching(nn.Module):
         suffix_out = suffix_out.to(dtype=torch.float32)
         v_t = self.action_out_proj(suffix_out)
         losses = F.mse_loss(u_t, v_t, reduction="none")
+
+        if self.use_acc_loss:
+            vel_diff = v_t[:, 1:, :] - v_t[:, :-1, :]
+            acc_loss = vel_diff.pow(2).mean(axis=(0, 1))
+            # # 3) combine
+            lambda_acc = 0.01
+            losses += lambda_acc * acc_loss
+
         return losses
 
     def sample_actions(self, images, img_masks, lang_tokens, lang_masks, state, noise=None) -> Tensor:
         """Do a full inference forward and compute the action (batch_size x num_steps x num_motors)"""
-        bsize = state.shape[0]
-        device = state.device
+        bsize = state.shape[0] if isinstance(state, torch.Tensor) else state[0].shape[0]
+        device = state.device if isinstance(state, torch.Tensor) else state[0].device
 
         if noise is None:
             actions_shape = (bsize, self.config.chunk_size, self.config.max_action_dim)

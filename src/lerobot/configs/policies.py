@@ -139,7 +139,9 @@ class PreTrainedConfig(draccus.ChoiceRegistry, HubMixin, abc.ABC):
     @property
     def action_feature(self) -> PolicyFeature | None:
         for ft_name, ft in self.output_features.items():
-            if ft.type is FeatureType.ACTION and ft_name == ACTION:
+            # Handle cases where the action feature is named differently
+            # e.g., "action.continuos" vs "action"
+            if ft.type is FeatureType.ACTION and ACTION in ft_name:
                 return ft
         return None
 

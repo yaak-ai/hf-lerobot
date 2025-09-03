@@ -18,6 +18,7 @@ import torch
 from torch import Tensor, nn
 
 from lerobot.configs.types import FeatureType, NormalizationMode, PolicyFeature
+from lerobot.policies.smolvla.conversion_utils_yaak import patch_norm_mode
 
 
 def create_stats_buffers(
@@ -162,6 +163,8 @@ class Normalize(nn.Module):
             if norm_mode is NormalizationMode.IDENTITY:
                 continue
 
+            norm_mode = patch_norm_mode(norm_mode, key, batch)
+
             buffer = getattr(self, "buffer_" + key.replace(".", "_"))
 
             if norm_mode is NormalizationMode.MEAN_STD:
@@ -179,6 +182,15 @@ class Normalize(nn.Module):
                 batch[key] = (batch[key] - min) / (max - min + 1e-8)
                 # normalize to [-1, 1]
                 batch[key] = batch[key] * 2 - 1
+                # clamp to [-1, 1] to avoid outliers in case of quantile normalization
+                batch[key] = torch.clamp(batch[key], -1, 1)
+            elif norm_mode is NormalizationMode.ZERO_ONE:
+                min = buffer["min"]
+                max = buffer["max"]
+                assert not torch.isinf(min).any(), _no_stats_error_str("min")
+                assert not torch.isinf(max).any(), _no_stats_error_str("max")
+                # normalize to [0,1]
+                batch[key] = (batch[key] - min) / (max - min + 1e-8)
             else:
                 raise ValueError(norm_mode)
         return batch
@@ -235,6 +247,9 @@ class Unnormalize(nn.Module):
             if norm_mode is NormalizationMode.IDENTITY:
                 continue
 
+            norm_mode = patch_norm_mode(norm_mode, key, batch)
+
+
             buffer = getattr(self, "buffer_" + key.replace(".", "_"))
 
             if norm_mode is NormalizationMode.MEAN_STD:
@@ -249,6 +264,12 @@ class Unnormalize(nn.Module):
                 assert not torch.isinf(min).any(), _no_stats_error_str("min")
                 assert not torch.isinf(max).any(), _no_stats_error_str("max")
                 batch[key] = (batch[key] + 1) / 2
+                batch[key] = batch[key] * (max - min) + min
+            elif norm_mode is NormalizationMode.ZERO_ONE:
+                min = buffer["min"]
+                max = buffer["max"]
+                assert not torch.isinf(min).any(), _no_stats_error_str("min")
+                assert not torch.isinf(max).any(), _no_stats_error_str("max")
                 batch[key] = batch[key] * (max - min) + min
             else:
                 raise ValueError(norm_mode)

@@ -101,6 +101,16 @@ class SmolVLAConfig(PreTrainedConfig):
     min_period: float = 4e-3  # sensitivity range for the timestep used in sine-cosine positional encoding
     max_period: float = 4.0
 
+    # Context
+    use_context: bool = False  # Whether to use context images in the model.
+    use_separate_intent: bool = False  # Whether to use separate intent projection
+    max_intent_dim: int = 32  # Maximum intent dimension. Used to pad the intent vector to this size.
+
+    # Image normalization
+    use_image_norm: int = 1  # 0: no normalization, 1: scale by sqrt(d), 2: L2 normalize
+    use_masked_loss: bool = False  # Whether to use masked loss for the action prediction
+    use_acc_loss: bool = False  # Whether to use the acceleration loss in the action prediction
+
     def __post_init__(self):
         super().__post_init__()
 
