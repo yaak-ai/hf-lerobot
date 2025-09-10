@@ -118,11 +118,12 @@ def eval_policy_yaak_loop(
     set_seed(start_seed)
 
     action_dim = policy.config.action_feature.shape[0]
+    chunk_size = policy.config.chunk_size
     loss_accumulator = torch.zeros(
         (len(eval_dataloader.dataset), action_dim), dtype=torch.float32, device=device
     )
     pred_actions = torch.zeros(
-        (len(eval_dataloader.dataset), action_dim), dtype=torch.float32, device=device
+        (len(eval_dataloader.dataset), chunk_size, action_dim), dtype=torch.float32, device=device
     )
     bsize = eval_dataloader.batch_size
     for step, elem in enumerate(eval_dataloader):
@@ -142,8 +143,8 @@ def eval_policy_yaak_loop(
                     "loss_first_timestamp", torch.zeros((bsize, 1), device=device)
                 )
             )
-            pred_actions[step * bsize : step * bsize + cur_bsize, :] = (
-                policy.predict_action_chunk(batch)[:, 0, :]
+            pred_actions[step * bsize : step * bsize + cur_bsize, ...] = (
+                policy.predict_action_chunk(batch)
             )
         eval_tracker.eval_loss = loss.item()
         eval_tracker.eval_update_s = time.perf_counter() - start_time
@@ -160,7 +161,7 @@ def eval_policy_yaak_loop(
         eval_dataloader.dataset.samples,
         stability_dict_wandb,
         log_images_wandb,
-        pred_actions,
+        pred_actions[:, 0, :],
     )
     return eval_tracker, stability_dict_wandb, log_images_wandb, pred_actions
 

@@ -30,25 +30,22 @@ def _create_reye_columns(actions, is_without_clip: bool) -> list[pl.Expr]:
 
     cols.extend([
         pl.col("meta/VehicleMotion/brake_pedal_normalized")
-        .list.last()
         .alias("predictions/policy/ground_truth/continuous/brake_pedal"),
         pl.col("meta/VehicleMotion/gas_pedal_normalized")
-        .list.last()
         .alias("predictions/policy/ground_truth/continuous/gas_pedal"),
         pl.col("meta/VehicleMotion/steering_angle_normalized")
-        .list.last()
         .alias("predictions/policy/ground_truth/continuous/steering_angle"),
         pl.lit(0).alias("predictions/policy/ground_truth/discrete/turn_signal"),
         pl.Series(
-            values=actions[:, 0],
+            values=actions[..., 0],
             name="predictions/policy/prediction_value/continuous/gas_pedal",
         ),
         pl.Series(
-            values=actions[:, 1],
+            values=actions[..., 1],
             name="predictions/policy/prediction_value/continuous/brake_pedal",
         ),
         pl.Series(
-            values=actions[:, -1],
+            values=actions[..., -1],
             name="predictions/policy/prediction_value/continuous/steering_angle",
         ),
         pl.lit(1)
@@ -89,20 +86,20 @@ def create_reye_df(eval_dataloader: DataLoader, actions, is_without_clip: bool) 
     return eval_dataloader.dataset.samples.select(cols).with_columns([
         (
             (
-                pl.col("predictions/policy/prediction_value/continuous/gas_pedal")
-                - pl.col("predictions/policy/ground_truth/continuous/gas_pedal")
+                pl.col("predictions/policy/prediction_value/continuous/gas_pedal").arr.first()
+                - pl.col("predictions/policy/ground_truth/continuous/gas_pedal").list.first()
             ).abs()
         ).alias("predictions/policy/score_l1/continuous/gas_pedal"),
         (
             (
-                pl.col("predictions/policy/prediction_value/continuous/brake_pedal")
-                - pl.col("predictions/policy/ground_truth/continuous/brake_pedal")
+                pl.col("predictions/policy/prediction_value/continuous/brake_pedal").arr.first()
+                - pl.col("predictions/policy/ground_truth/continuous/brake_pedal").list.first()
             ).abs()
         ).alias("predictions/policy/score_l1/continuous/brake_pedal"),
         (
             (
-                pl.col("predictions/policy/prediction_value/continuous/steering_angle")
-                - pl.col("predictions/policy/ground_truth/continuous/steering_angle")
+                pl.col("predictions/policy/prediction_value/continuous/steering_angle").arr.first()
+                - pl.col("predictions/policy/ground_truth/continuous/steering_angle").list.first()
             ).abs()
         ).alias("predictions/policy/score_l1/continuous/steering_angle"),
         pl.lit(0)
