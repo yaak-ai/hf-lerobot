@@ -836,7 +836,7 @@ class VLAFlowMatching(nn.Module):
 
             embs.append(img_emb)
             pad_masks.append(img_mask)
-
+            # att_masks += [0] * (num_img_embs) if not self.use_context else [1] + [0] * (num_img_embs - 1)
             att_masks += [0] * (num_img_embs)
             if self.add_image_special_tokens:
                 image_end_token = (

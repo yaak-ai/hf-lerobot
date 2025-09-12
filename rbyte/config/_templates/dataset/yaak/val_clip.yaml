@@ -327,7 +327,7 @@ samples:
           _target_: rbyte.io.DataFrameGroupByDynamic
           index_column: meta/ImageMetadata.cam_front_left/frame_idx
           every: 10i
-          period: 101i
+          period: 61i
           closed: left
           gather_every: 1
 
@@ -342,19 +342,19 @@ samples:
         bound:
           query: |
             SELECT
-                list_slice("meta/ImageMetadata.cam_front_left/time_stamp"::TIMESTAMP[101], 1, 60, 10) AS "meta/ImageMetadata.cam_front_left/time_stamp",
-                list_slice("meta/ImageMetadata.cam_front_left/frame_idx"::INT32[101], 1, 60, 10) AS "meta/ImageMetadata.cam_front_left/frame_idx",
-                list_slice("meta/VehicleMotion/speed"::FLOAT[101], 1, 60, 10) AS "observation.state.vehicle",
-                list_slice("meta/VehicleMotion/gas_pedal_normalized"::FLOAT[101],  52, 101, 1) AS "meta/VehicleMotion/gas_pedal_normalized",
-                list_slice("meta/VehicleMotion/brake_pedal_normalized"::FLOAT[101],  52, 101, 1) AS "meta/VehicleMotion/brake_pedal_normalized",
-                list_slice("meta/VehicleMotion/steering_angle_normalized"::FLOAT[101],  52, 101, 1) AS "meta/VehicleMotion/steering_angle_normalized",
-                flatten(("waypoints/xy_normalized"::FLOAT[2][10][101])[51]) AS "observation.state.waypoints",
+                list_slice("meta/ImageMetadata.cam_front_left/time_stamp"::TIMESTAMP[61], 1, 60, 10) AS "meta/ImageMetadata.cam_front_left/time_stamp",
+                list_slice("meta/ImageMetadata.cam_front_left/frame_idx"::INT32[61], 1, 60, 10) AS "meta/ImageMetadata.cam_front_left/frame_idx",
+                list_slice("meta/VehicleMotion/speed"::FLOAT[61], 1, 60, 10) AS "observation.state.vehicle",
+                list_slice("meta/VehicleMotion/gas_pedal_normalized"::FLOAT[61],  52, 61, 1) AS "meta/VehicleMotion/gas_pedal_normalized",
+                list_slice("meta/VehicleMotion/brake_pedal_normalized"::FLOAT[61],  52, 61, 1) AS "meta/VehicleMotion/brake_pedal_normalized",
+                list_slice("meta/VehicleMotion/steering_angle_normalized"::FLOAT[61],  52, 61, 1) AS "meta/VehicleMotion/steering_angle_normalized",
+                flatten(("waypoints/xy_normalized"::FLOAT[2][10][61])[51]) AS "observation.state.waypoints",
                 'Given the waypoints and current vehicle speed, follow the waypoints while adhering to traffic rules and regulations' as "task"
             FROM
                 samples
             WHERE
-                len("meta/ImageMetadata.cam_front_left/frame_idx") = 101
-                AND list_last("meta/ImageMetadata.cam_front_left/frame_idx") - list_first("meta/ImageMetadata.cam_front_left/frame_idx") == 100
+                len("meta/ImageMetadata.cam_front_left/frame_idx") = 61
+                AND list_last("meta/ImageMetadata.cam_front_left/frame_idx") - list_first("meta/ImageMetadata.cam_front_left/frame_idx") == 60
                 AND NOT (
                     list_max(list_slice("meta/VehicleMotion/gas_pedal_normalized", 1, 60, 10)) <= (1.0 / 255 + 0.001)
                     AND list_max(list_slice("meta/VehicleMotion/brake_pedal_normalized", 1, 60, 10)) <= (1.0 / 164 + 0.001)
