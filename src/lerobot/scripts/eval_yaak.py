@@ -66,6 +66,7 @@ from lerobot.policies.smolvla.conversion_utils_yaak import (
     __getbatch__,
     load_dataset_stats,
 )
+from lerobot.policies.smolvla.modeling_smolvla import pad_vector
 from lerobot.policies.utils import get_device_from_parameters
 from lerobot.utils.logging_utils import AverageMeter, MetricsTracker
 from lerobot.utils.random_utils import set_seed
@@ -123,7 +124,9 @@ def eval_policy_yaak_loop(
         (len(eval_dataloader.dataset), action_dim), dtype=torch.float32, device=device
     )
     pred_actions = torch.zeros(
-        (len(eval_dataloader.dataset), chunk_size, action_dim), dtype=torch.float32, device=device
+        (len(eval_dataloader.dataset), chunk_size, action_dim),
+        dtype=torch.float32,
+        device=device,
     )
     bsize = eval_dataloader.batch_size
     for step, elem in enumerate(eval_dataloader):
@@ -136,17 +139,19 @@ def eval_policy_yaak_loop(
             if isinstance(batch[key], torch.Tensor):
                 batch[key] = batch[key].to(device, non_blocking=True)
         with torch.inference_mode():
-            loss, loss_dict = policy.forward(batch)
-            # accumulate losses to track stability
-            loss_accumulator[step * bsize : step * bsize + cur_bsize, :] = (
-                loss_dict.get(
-                    "loss_first_timestamp", torch.zeros((bsize, 1), device=device)
-                )
-            )
+            actions_shape = (cur_bsize, policy.config.chunk_size, policy.config.max_action_dim)
+            noise = policy.model.sample_noise(actions_shape, device)
             pred_actions[step * bsize : step * bsize + cur_bsize, ...] = (
                 policy.predict_action_chunk(batch)
+                if step == 0
+                else policy.predict_action_chunk(
+                    batch,
+                    noise=None,
+                    x_t_prev=pad_vector(pred_actions[
+                        (step - 1) * bsize : (step - 1) * bsize + cur_bsize, ...
+                    ], policy.config.max_action_dim),
+                )
             )
-        eval_tracker.eval_loss = loss.item()
         eval_tracker.eval_update_s = time.perf_counter() - start_time
         eval_tracker.step()
         del batch

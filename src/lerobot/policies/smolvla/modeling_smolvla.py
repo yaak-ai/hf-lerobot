@@ -73,6 +73,7 @@ from lerobot.policies.normalize import (
 from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.policies.smolvla.configuration_smolvla import SmolVLAConfig
 from lerobot.policies.smolvla.conversion_utils_yaak import merge_waypoints_speed_as_state
+from lerobot.policies.smolvla.rtc_utils import PrefixAttentionSchedule, get_prefix_weights
 from lerobot.policies.smolvla.smolvlm_with_expert import SmolVLMWithExpertModel
 from lerobot.policies.utils import (
     populate_queues,
@@ -388,7 +389,7 @@ class SmolVLAPolicy(PreTrainedPolicy):
     def get_optim_params(self) -> dict:
         return self.parameters()
 
-    def _get_action_chunk(self, batch: dict[str, Tensor], noise: Tensor | None = None) -> Tensor:
+    def _get_action_chunk(self, batch: dict[str, Tensor], noise: Tensor | None = None, x_t_prev: Tensor | None = None) -> Tensor:
         # TODO: Check if this for loop is needed.
         # Context: In fact, self.queues contains only ACTION field, and in inference, we don't have action in the batch
         # In the case of offline inference, we have the action in the batch
@@ -402,7 +403,7 @@ class SmolVLAPolicy(PreTrainedPolicy):
         state = self.prepare_state(batch) if not self.use_context else self.prepare_state_context(batch)
         lang_tokens, lang_masks = self.prepare_language(batch)
 
-        actions = self.model.sample_actions(images, img_masks, lang_tokens, lang_masks, state, noise=noise)
+        actions = self.model.sample_actions(images, img_masks, lang_tokens, lang_masks, state, noise=noise, x_t_prev=x_t_prev)
 
         # Unpad actions
         original_action_dim = self.config.action_feature.shape[0]
@@ -424,13 +425,13 @@ class SmolVLAPolicy(PreTrainedPolicy):
         return batch
 
     @torch.no_grad()
-    def predict_action_chunk(self, batch: dict[str, Tensor], noise: Tensor | None = None) -> Tensor:
+    def predict_action_chunk(self, batch: dict[str, Tensor], noise: Tensor | None = None, x_t_prev: Tensor | None = None) -> Tensor:
         self.eval()
 
         batch = self._prepare_batch(batch)
         self._queues = populate_queues(self._queues, batch, exclude_keys=[ACTION])
 
-        actions = self._get_action_chunk(batch, noise)
+        actions = self._get_action_chunk(batch, noise, x_t_prev=x_t_prev)
         return actions
 
     @torch.no_grad()
@@ -448,7 +449,7 @@ class SmolVLAPolicy(PreTrainedPolicy):
         # Action queue logic for n_action_steps > 1. When the action_queue is depleted, populate it by
         # querying the policy.
         if len(self._queues[ACTION]) == 0:
-            actions = self._get_action_chunk(batch, noise)
+            actions = self._get_action_chunk(batch, noise, None)
 
             # `self.predict_action_chunk` returns a (batch_size, n_action_steps, action_dim) tensor, but the queue
             # effectively has shape (n_action_steps, batch_size, *), hence the transpose.
@@ -979,7 +980,7 @@ class VLAFlowMatching(nn.Module):
 
         return losses
 
-    def sample_actions(self, images, img_masks, lang_tokens, lang_masks, state, noise=None) -> Tensor:
+    def sample_actions(self, images, img_masks, lang_tokens, lang_masks, state, noise=None, x_t_prev=None) -> Tensor:
         """Do a full inference forward and compute the action (batch_size x num_steps x num_motors)"""
         bsize = state.shape[0] if isinstance(state, torch.Tensor) else state[0].shape[0]
         device = state.device if isinstance(state, torch.Tensor) else state[0].device
@@ -1009,11 +1010,25 @@ class VLAFlowMatching(nn.Module):
         time = torch.tensor(1.0, dtype=torch.float32, device=device)
         while time >= -dt / 2:
             expanded_time = time.expand(bsize)
-            v_t = self.denoise_step(
-                prefix_pad_masks,
-                past_key_values,
-                x_t,
-                expanded_time,
+            v_t = (
+                self.denoise_step(
+                    prefix_pad_masks,
+                    past_key_values,
+                    x_t,
+                    expanded_time,
+                )
+                if x_t_prev is None
+                else self.denoise_step_rtc(
+                    x_t_prev,
+                    prefix_pad_masks,
+                    past_key_values,
+                    x_t,
+                    expanded_time,
+                    0,
+                    self.config.chunk_size - 1,
+                    "exp",
+                    torch.tensor(5.0).to(x_t.device)
+                )
             )
             # Euler step
             x_t += dt * v_t
@@ -1054,3 +1069,44 @@ class VLAFlowMatching(nn.Module):
         suffix_out = suffix_out.to(dtype=torch.float32)
         v_t = self.action_out_proj(suffix_out)
         return v_t
+
+
+    def denoise_step_rtc(
+        self,
+        prev_action_chunk,
+        prefix_pad_masks,
+        past_key_values,
+        x_t,
+        time,
+        inference_delay: int,
+        prefix_attention_horizon: int,
+        prefix_attention_schedule: PrefixAttentionSchedule,
+        max_guidance_weight: torch.Tensor,
+    ):
+        def pinv_corrected_velocity(x_t, y, t):  # noqa: ANN202
+            def guidance(
+                t: torch.Tensor, max_guidance_weight: torch.Tensor
+            ) -> torch.Tensor:
+                # constants from paper
+                inv_r2 = (t**2 + (1 - t) ** 2) / ((1 - t) ** 2)
+                c = torch.nan_to_num((1 - t) / t, posinf=max_guidance_weight)
+                return torch.minimum(c * inv_r2, max_guidance_weight)
+
+            def denoiser(x_t):  # noqa: ANN202
+                v_t = self.denoise_step(prefix_pad_masks, past_key_values, x_t, t)
+                return x_t + v_t * -t, v_t
+
+            x_1, vjp_fun, v_t = torch.func.vjp(denoiser, x_t, has_aux=True)
+            weights = get_prefix_weights(
+                inference_delay,
+                prefix_attention_horizon,
+                self.config.chunk_size,
+                prefix_attention_schedule,
+            ).to(x_t.device)
+            error = (y - x_1) * weights[:, None]
+            pinv_correction = vjp_fun(error)[0]
+            guidance_weight = guidance(1 - t, max_guidance_weight)
+            return v_t + guidance_weight * pinv_correction
+
+        v_t = pinv_corrected_velocity(x_t, prev_action_chunk, time)
+        return v_t  # noqa: RET504
