@@ -1025,7 +1025,7 @@ class VLAFlowMatching(nn.Module):
                     x_t,
                     expanded_time,
                     0,
-                    self.config.chunk_size - 1,
+                    10,  # do not attend to all 50 actions
                     "exp",
                     torch.tensor(5.0).to(x_t.device)
                 )
@@ -1070,7 +1070,6 @@ class VLAFlowMatching(nn.Module):
         v_t = self.action_out_proj(suffix_out)
         return v_t
 
-
     def denoise_step_rtc(
         self,
         prev_action_chunk,
@@ -1106,7 +1105,7 @@ class VLAFlowMatching(nn.Module):
             error = (y - x_1) * weights[:, None]
             pinv_correction = vjp_fun(error)[0]
             guidance_weight = guidance(1 - t, max_guidance_weight)
-            return v_t + guidance_weight * pinv_correction
+            return v_t - pinv_correction * guidance_weight
 
         v_t = pinv_corrected_velocity(x_t, prev_action_chunk, time)
         return v_t  # noqa: RET504
