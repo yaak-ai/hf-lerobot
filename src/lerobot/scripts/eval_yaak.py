@@ -96,9 +96,9 @@ def load_from_wandb_artifact(artifact: str, stats: Path) -> None:
     train_cfg = TrainPipelineConfig.from_pretrained(artifact_dir)
 
     train_cfg.policy.pretrained_path = artifact_dir
-    logging.info(pformat(asdict(train_cfg)))
+    logging.info(pformat(asdict(train_cfg)))  # noqa: LOG015
 
-    logging.info("Making policy.")
+    logging.info("Making policy.")  # noqa: LOG015
     policy = make_policy_yaak(
         cfg=train_cfg.policy,
         stats=dataset_stats,
@@ -128,6 +128,11 @@ def eval_policy_yaak_loop(
         dtype=torch.float32,
         device=device,
     )
+    pred_actions_iid = torch.zeros(
+        (len(eval_dataloader.dataset), chunk_size, action_dim),
+        dtype=torch.float32,
+        device=device,
+    )
     bsize = eval_dataloader.batch_size
     for step, elem in enumerate(eval_dataloader):
         policy.reset()  # Clear queues and reset the policy state
@@ -138,20 +143,29 @@ def eval_policy_yaak_loop(
         for key in batch:
             if isinstance(batch[key], torch.Tensor):
                 batch[key] = batch[key].to(device, non_blocking=True)
-        with torch.inference_mode():
-            actions_shape = (cur_bsize, policy.config.chunk_size, policy.config.max_action_dim)
-            noise = policy.model.sample_noise(actions_shape, device)
-            pred_actions[step * bsize : step * bsize + cur_bsize, ...] = (
-                policy.predict_action_chunk(batch)
-                if step == 0
-                else policy.predict_action_chunk(
-                    batch,
-                    noise=None,
-                    x_t_prev=pad_vector(pred_actions[
+        actions_shape = (
+            cur_bsize,
+            policy.config.chunk_size,
+            policy.config.max_action_dim,
+        )
+        noise = policy.model.sample_noise(actions_shape, device)
+        pred_actions_iid[step * bsize : step * bsize + cur_bsize, ...] = (
+            policy.predict_action_chunk(batch, noise=noise.clone(), x_t_prev=None)
+        )
+        pred_actions[step * bsize : step * bsize + cur_bsize, ...] = (
+            pred_actions_iid[step * bsize : step * bsize + cur_bsize, ...]
+            if step == 0
+            else policy.predict_action_chunk(
+                batch,
+                noise=noise.clone(),
+                x_t_prev=pad_vector(
+                    pred_actions[
                         (step - 1) * bsize : (step - 1) * bsize + cur_bsize, ...
-                    ], policy.config.max_action_dim),
-                )
+                    ],
+                    policy.config.max_action_dim,
+                ),
             )
+        )
         eval_tracker.eval_update_s = time.perf_counter() - start_time
         eval_tracker.step()
         del batch
@@ -161,6 +175,7 @@ def eval_policy_yaak_loop(
     stability_dict_wandb = {}
     log_images_wandb = []
     pred_actions = pred_actions.cpu()
+    pred_actions_iid = pred_actions_iid.cpu()
     metric_accum_callback(
         loss_accumulator.cpu(),
         eval_dataloader.dataset.samples,
@@ -168,7 +183,13 @@ def eval_policy_yaak_loop(
         log_images_wandb,
         pred_actions[:, 0, :],
     )
-    return eval_tracker, stability_dict_wandb, log_images_wandb, pred_actions
+    return (
+        eval_tracker,
+        stability_dict_wandb,
+        log_images_wandb,
+        pred_actions,
+        pred_actions_iid,
+    )
 
 
 def eval_policy_yaak(
@@ -177,7 +198,7 @@ def eval_policy_yaak(
     eval_tracker: MetricsTracker,
     start_seed: int,
 ) -> MetricsTracker:
-    eval_tracker, stability_dict_wandb, log_images_wandb, _ = eval_policy_yaak_loop(
+    eval_tracker, stability_dict_wandb, log_images_wandb, _, _ = eval_policy_yaak_loop(
         policy, eval_dataloader, eval_tracker, start_seed
     )
     return eval_tracker, stability_dict_wandb, log_images_wandb
@@ -190,11 +211,11 @@ def predict_policy_yaak(
     start_seed: int,
     reye_output_dir: Path,
 ) -> MetricsTracker:
-    eval_tracker, stability_dict_wandb, _, pred_actions = eval_policy_yaak_loop(
-        policy, eval_dataloader, eval_tracker, start_seed
+    eval_tracker, stability_dict_wandb, _, pred_actions, pred_actions_iid = (
+        eval_policy_yaak_loop(policy, eval_dataloader, eval_tracker, start_seed)
     )
     for key, value in stability_dict_wandb.items():
-        logging.info(f"{key}: {value:.4f}")  # noqa: G004
+        logging.info(f"{key}: {value:.4f}")  # noqa: G004, LOG015
     ts = eval_dataloader.dataset.samples[
         "meta/ImageMetadata.cam_front_left/time_stamp"
     ][0]
@@ -204,9 +225,15 @@ def predict_policy_yaak(
     df = create_reye_df(
         eval_dataloader, pred_actions, is_without_clip=isinstance(ts, datetime.datetime)
     )
-    reye_path = reye_output_dir / "results17.parquet"
+    df_iid = create_reye_df(
+        eval_dataloader,
+        pred_actions_iid,
+        is_without_clip=isinstance(ts, datetime.datetime),
+    )
+    reye_path = reye_output_dir / "results.parquet"
     df.write_parquet(reye_path)
-    logging.info(f"Predictions saved to {reye_path}")  # noqa: G004
+    df_iid.write_parquet(reye_output_dir / "results_iid.parquet")
+    logging.info(f"Predictions saved to {reye_path}")  # noqa: G004, LOG015
     return eval_tracker
 
 
@@ -216,7 +243,7 @@ def predict_main_yaak(
     train_cfg: TrainPipelineConfig,
     output_dir: Path,
 ) -> None:
-    logging.info(
+    logging.info(  # noqa: LOG015
         colored("Output dir:", "yellow", attrs=["bold"]) + f" {train_cfg.output_dir}"  # noqa: G003
     )
 
@@ -249,7 +276,7 @@ def predict_main_yaak(
             start_seed=train_cfg.seed,
             reye_output_dir=output_dir,
         )
-    logging.info("End of eval")
+    logging.info("End of eval")  # noqa: LOG015
 
 
 if __name__ == "__main__":
