@@ -77,7 +77,7 @@ from lerobot.utils.utils import (
 from lerobot.utils.wandb_utils_yaak import metric_accum_callback
 
 
-def load_from_wandb_artifact(artifact: str, stats: Path) -> None:
+def load_from_wandb_artifact(artifact: str, stats: Path, data_chunk: int) -> None:
     """rbyte callback specified in yaml"""
     import wandb  # noqa: PLC0415
 
@@ -103,6 +103,10 @@ def load_from_wandb_artifact(artifact: str, stats: Path) -> None:
         cfg=train_cfg.policy,
         stats=dataset_stats,
     )
+    if policy.config.chunk_size != (data_chunk - 51):
+        raise ValueError(
+            f"Expected chunk_size to be {data_chunk - 51}, but got {policy.config.chunk_size}."
+        )
     return policy, train_cfg
 
 
