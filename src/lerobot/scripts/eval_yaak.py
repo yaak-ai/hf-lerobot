@@ -125,6 +125,8 @@ def eval_policy_yaak_loop(
         (len(eval_dataloader.dataset), action_dim), dtype=torch.float32, device=device
     )
     bsize = eval_dataloader.batch_size
+    noise_row = policy.model.sample_noise((1, policy.config.chunk_size, policy.config.max_action_dim), device)
+    noise = noise_row.repeat(bsize, 1, 1)
     for step, elem in enumerate(eval_dataloader):
         policy.reset()  # Clear queues and reset the policy state
         start_time = time.perf_counter()
@@ -142,8 +144,10 @@ def eval_policy_yaak_loop(
                     "loss_first_timestamp", torch.zeros((bsize, 1), device=device)
                 )
             )
+            if cur_bsize != bsize:
+                noise = noise_row.repeat(cur_bsize, 1, 1)
             pred_actions[step * bsize : step * bsize + cur_bsize, :] = (
-                policy.predict_action_chunk(batch)[:, 0, :]
+                policy.predict_action_chunk(batch, noise=noise.clone())[:, 0, :]
             )
         eval_tracker.eval_loss = loss.item()
         eval_tracker.eval_update_s = time.perf_counter() - start_time
@@ -198,7 +202,7 @@ def predict_policy_yaak(
     df = create_reye_df(
         eval_dataloader, pred_actions, is_without_clip=isinstance(ts, datetime.datetime)
     )
-    reye_path = reye_output_dir / "results17.parquet"
+    reye_path = reye_output_dir / "results.parquet"
     df.write_parquet(reye_path)
     logging.info(f"Predictions saved to {reye_path}")  # noqa: G004
     return eval_tracker
