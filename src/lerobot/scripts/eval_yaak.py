@@ -144,8 +144,8 @@ def eval_policy_yaak_loop(
                     "loss_first_timestamp", torch.zeros((bsize, 1), device=device)
                 )
             )
-        if cur_bsize != bsize:
-            noise = noise_row.repeat(cur_bsize, 1, 1)
+            if cur_bsize != bsize:
+                noise = noise_row.repeat(cur_bsize, 1, 1)
             pred_actions[step * bsize : step * bsize + cur_bsize, :] = (
                 policy.predict_action_chunk(batch, noise=noise.clone())[:, 0, :]
             )
