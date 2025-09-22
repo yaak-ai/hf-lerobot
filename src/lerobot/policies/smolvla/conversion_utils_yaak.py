@@ -33,9 +33,7 @@ def patch_norm_mode(
     # and would need to be extra careful to not break anything
     if "observation.state.waypoints" not in batch:
         return norm_mode
-    return (
-        NormalizationMode.ZERO_ONE if key == "observation.state.vehicle" else norm_mode
-    )
+    return norm_mode
 
 
 def load_dataset_stats(stats_path: str | Path) -> dict[str, dict[str, np.ndarray]]:
@@ -165,9 +163,9 @@ def __getbatch__(a: dict) -> dict:  # noqa: N807
         else a.data["observation.state.vehicle"][:, None, None]
     ).to(dtype=torch.float32)
     seq_len = batch["observation.state.vehicle"].shape[1]
+    wps = a.data["observation.state.waypoints"][:, None, :]
     batch["observation.state.waypoints"] = (
-        a.data["observation.state.waypoints"][:, None, :]
-        .expand(-1, seq_len, -1)
+        wps.expand(-1, seq_len, -1)
         .to(dtype=torch.float32)
     )
     return batch  # noqa: DOC201
