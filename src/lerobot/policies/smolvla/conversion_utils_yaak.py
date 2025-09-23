@@ -22,9 +22,7 @@ if TYPE_CHECKING:
     from rbyte import Dataset
 
 
-def patch_norm_mode(
-    norm_mode: NormalizationMode, key: str, batch: dict[str, Tensor]
-) -> NormalizationMode:
+def patch_norm_mode(norm_mode: NormalizationMode, key: str, batch: dict[str, Tensor]) -> NormalizationMode:
     # Monkey patch for the case where different STATE features have
     # different normalization modes
 
@@ -40,10 +38,7 @@ def load_dataset_stats(stats_path: str | Path) -> dict[str, dict[str, np.ndarray
     stats_path = Path(stats_path)
     with stats_path.open() as f:
         stats_json = json.load(f)
-    return {
-        k: {metric: np.array(vals) for metric, vals in v.items()}
-        for k, v in stats_json.items()
-    }
+    return {k: {metric: np.array(vals) for metric, vals in v.items()} for k, v in stats_json.items()}
 
 
 def compute_stats(samples: Dataset, stat_file: str = "dataset_stats.json") -> None:
@@ -82,9 +77,7 @@ def compute_stats(samples: Dataset, stat_file: str = "dataset_stats.json") -> No
     for i, key in enumerate(keys):
         dataset_stats["action.continuous"][key] = action_stats[i, :].tolist()
 
-    waypoints = np.stack(samples["observation.state.waypoints"].to_numpy()).reshape(
-        -1, 2
-    )
+    waypoints = np.stack(samples["observation.state.waypoints"].to_numpy()).reshape(-1, 2)
     wp_cnt = 10
     wps = [
         np.tile(waypoints.min(), wp_cnt * 2),
@@ -118,9 +111,7 @@ def compute_stats(samples: Dataset, stat_file: str = "dataset_stats.json") -> No
 
 
 @torch.no_grad
-def merge_waypoints_speed_as_state(
-    batch: dict[str, torch.Tensor], key: str
-) -> dict[str, torch.Tensor]:
+def merge_waypoints_speed_as_state(batch: dict[str, torch.Tensor], key: str) -> dict[str, torch.Tensor]:
     """Used when waypoint and speed"""
     # compare inputs (lerobot or yaak constants) to yaak constants
     if key != constants_yaak.OBS_STATE:
@@ -153,19 +144,17 @@ def __getbatch__(a: dict) -> dict:  # noqa: N807
         if a.data["cam_front_left"].ndim == 4  # noqa: PLR2004
         else a.data["cam_front_left"]
     )
-    batch["observation.images.front_left"] = (
-        torch.zeros_like(img).permute(0, 1, 4, 2, 3).type(torch.float32) / 255
-    )
+    batch["observation.images.front_left"] = img.permute(0, 1, 4, 2, 3).type(torch.float32) / 255
     # Handling longer contexts (ndim == 3) and single timestamps (ndim == 2)
-    batch["observation.state.vehicle"] = (
+    state = (
         a.data["observation.state.vehicle"][:, :, None]
-        if a.data["observation.state.vehicle"].ndim == 2  # noqa: PLR2004
+        if a.data["observation.state.vehicle"].ndim == 2
         else a.data["observation.state.vehicle"][:, None, None]
-    ).to(dtype=torch.float32)
+    )
+    batch["observation.state.vehicle"] = torch.zeros_like(state).to(dtype=torch.float32)
     seq_len = batch["observation.state.vehicle"].shape[1]
     batch["observation.state.waypoints"] = (
-        a.data["observation.state.waypoints"][:, None, :].expand(-1, seq_len, -1)
-        .to(dtype=torch.float32)
+        a.data["observation.state.waypoints"][:, None, :].expand(-1, seq_len, -1).to(dtype=torch.float32)
     )
     return batch  # noqa: DOC201
 
