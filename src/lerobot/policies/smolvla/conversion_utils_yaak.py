@@ -154,7 +154,7 @@ def __getbatch__(a: dict) -> dict:  # noqa: N807
         else a.data["cam_front_left"]
     )
     batch["observation.images.front_left"] = (
-        img.permute(0, 1, 4, 2, 3).type(torch.float32) / 255
+        torch.zeros_like(img).permute(0, 1, 4, 2, 3).type(torch.float32) / 255
     )
     # Handling longer contexts (ndim == 3) and single timestamps (ndim == 2)
     batch["observation.state.vehicle"] = (
@@ -163,9 +163,8 @@ def __getbatch__(a: dict) -> dict:  # noqa: N807
         else a.data["observation.state.vehicle"][:, None, None]
     ).to(dtype=torch.float32)
     seq_len = batch["observation.state.vehicle"].shape[1]
-    wps = a.data["observation.state.waypoints"][:, None, :]
     batch["observation.state.waypoints"] = (
-        wps.expand(-1, seq_len, -1)
+        a.data["observation.state.waypoints"][:, None, :].expand(-1, seq_len, -1)
         .to(dtype=torch.float32)
     )
     return batch  # noqa: DOC201
