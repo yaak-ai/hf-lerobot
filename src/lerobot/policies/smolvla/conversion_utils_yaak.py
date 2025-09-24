@@ -128,7 +128,11 @@ def merge_waypoints_speed_as_state(
     if key != constants_yaak.OBS_STATE:
         # lerobot's OBS_STATE != yaak's OBS_STATE
         return batch[key]  # noqa: DOC201
-    return torch.cat((batch[key], batch[constants_yaak.OBS_STATE_VEHICLE]), dim=-1)
+    return (
+        torch.cat((batch[key], batch[constants_yaak.OBS_STATE_VEHICLE]), dim=-1)
+        if constants_yaak.OBS_STATE_VEHICLE in batch
+        else batch[key]
+    )
 
 
 def __getbatch__(a: dict) -> dict:  # noqa: N807
@@ -159,15 +163,8 @@ def __getbatch__(a: dict) -> dict:  # noqa: N807
         img.permute(0, 1, 4, 2, 3).type(torch.float32) / 255
     )
     # Handling longer contexts (ndim == 3) and single timestamps (ndim == 2)
-    batch["observation.state.vehicle"] = (
-        a.data["observation.state.vehicle"][:, :, None]
-        if a.data["observation.state.vehicle"].ndim == 2  # noqa: PLR2004
-        else a.data["observation.state.vehicle"][:, None, None]
-    ).to(dtype=torch.float32)
-    seq_len = batch["observation.state.vehicle"].shape[1]
     batch["observation.state.waypoints"] = (
         a.data["observation.state.waypoints"][:, None, :]
-        .expand(-1, seq_len, -1)
         .to(dtype=torch.float32)
     )
     return batch  # noqa: DOC201
