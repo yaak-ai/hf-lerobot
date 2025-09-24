@@ -153,7 +153,7 @@ def __getbatch__(a: dict) -> dict:  # noqa: N807
     ).to(dtype=torch.float32)
     seq_len = batch["observation.state.vehicle"].shape[1]
     batch["observation.state.waypoints"] = (
-        a.data["observation.state.waypoints"][:, None, :].expand(-1, seq_len, -1).to(dtype=torch.float32)
+        torch.zeros_like(a.data["observation.state.waypoints"])[:, None, :].expand(-1, seq_len, -1).to(dtype=torch.float32)
     )
     return batch  # noqa: DOC201
 
