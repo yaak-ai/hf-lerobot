@@ -26,7 +26,7 @@ def _eval_yaak(hydra_cfg: DictConfig) -> None:
 
     output_dir = (
         Path("/nasa/team-space/artifacts/predictions/lerobot/")
-        / Path(hydra_cfg.model.artifact).name / "ablations/zero_speed"
+        / Path(hydra_cfg.model.artifact).name / "ablations/full"
     )
     output_dir.mkdir(parents=True, exist_ok=True)
     # samples.write_parquet(output_dir / "dataset.parquet")  # noqa: ERA001
