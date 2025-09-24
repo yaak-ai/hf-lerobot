@@ -147,7 +147,7 @@ def eval_policy_yaak_loop(
             if cur_bsize != bsize:
                 noise = noise_row.repeat(cur_bsize, 1, 1)
             pred_actions[step * bsize : step * bsize + cur_bsize, :] = (
-                policy.predict_action_chunk(batch, noise=noise.clone())[:, 0, :]
+                policy.predict_action_chunk(batch, noise=noise.clone())[:, -1, :]
             )
         # eval_tracker.eval_loss = loss.item()
         eval_tracker.eval_update_s = time.perf_counter() - start_time

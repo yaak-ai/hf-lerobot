@@ -30,13 +30,13 @@ def _create_reye_columns(actions, is_without_clip: bool) -> list[pl.Expr]:
 
     cols.extend([
         pl.col("meta/VehicleMotion/brake_pedal_normalized")
-        .list.first()
+        .list.last()
         .alias("predictions/policy/ground_truth/continuous/brake_pedal"),
         pl.col("meta/VehicleMotion/gas_pedal_normalized")
-        .list.first()
+        .list.last()
         .alias("predictions/policy/ground_truth/continuous/gas_pedal"),
         pl.col("meta/VehicleMotion/steering_angle_normalized")
-        .list.first()
+        .list.last()
         .alias("predictions/policy/ground_truth/continuous/steering_angle"),
         pl.lit(0).alias("predictions/policy/ground_truth/discrete/turn_signal"),
         pl.Series(
