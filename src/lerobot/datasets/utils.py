@@ -41,6 +41,7 @@ from lerobot.datasets.backward_compatibility import (
     BackwardCompatibilityError,
     ForwardCompatibilityError,
 )
+from lerobot.utils.constants import OBS_ENV_STATE, OBS_STR
 from lerobot.utils.utils import is_valid_numpy_dtype_string
 
 DEFAULT_CHUNK_SIZE = 1000  # Max number of episodes per chunk
@@ -601,7 +602,7 @@ def hw_to_dataset_features(
             "names": list(joint_fts),
         }
 
-    if joint_fts and prefix == "observation":
+    if joint_fts and prefix == OBS_STR:
         features[f"{prefix}.state"] = {
             "dtype": "float32",
             "shape": (len(joint_fts),),
@@ -677,9 +678,9 @@ def dataset_to_policy_features(features: dict[str, dict]) -> dict[str, PolicyFea
             # Backward compatibility for "channel" which is an error introduced in LeRobotDataset v2.0 for ported datasets.
             if names[2] in ["channel", "channels"]:  # (h, w, c) -> (c, h, w)
                 shape = (shape[2], shape[0], shape[1])
-        elif key == "observation.environment_state":
+        elif key == OBS_ENV_STATE:
             type = FeatureType.ENV
-        elif key.startswith("observation"):
+        elif key.startswith(OBS_STR):
             type = FeatureType.STATE
         elif key.startswith("action"):
             type = FeatureType.ACTION

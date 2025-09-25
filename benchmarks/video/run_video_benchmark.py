@@ -40,7 +40,7 @@ from lerobot.datasets.video_utils import (
     decode_video_frames_torchvision,
     encode_video_frames,
 )
-from lerobot.utils.benchmark import TimeBenchmark
+from lerobot.utils.constants import OBS_IMAGE
 
 BASE_ENCODING = OrderedDict(
     [
@@ -116,7 +116,7 @@ def save_first_episode(imgs_dir: Path, dataset: LeRobotDataset) -> None:
     hf_dataset = dataset.hf_dataset.with_format(None)
 
     # We only save images from the first camera
-    img_keys = [key for key in hf_dataset.features if key.startswith("observation.image")]
+    img_keys = [key for key in hf_dataset.features if key.startswith(OBS_IMAGE)]
     imgs_dataset = hf_dataset.select_columns(img_keys[0])
 
     for i, item in enumerate(

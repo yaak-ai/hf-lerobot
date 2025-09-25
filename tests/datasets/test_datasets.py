@@ -43,6 +43,8 @@ from lerobot.datasets.utils import (
 )
 from lerobot.envs.factory import make_env_config
 from lerobot.policies.factory import make_policy_config
+from lerobot.robots import make_robot_from_config
+from lerobot.utils.constants import OBS_IMAGES, OBS_STATE, OBS_STR
 from tests.fixtures.constants import DUMMY_CHW, DUMMY_HWC, DUMMY_REPO_ID
 from tests.utils import require_x86_64_kernel
 
@@ -69,7 +71,10 @@ def test_same_attributes_defined(tmp_path, lerobot_dataset_factory):
     objects have the same sets of attributes defined.
     """
     # Instantiate both ways
-    features = {"state": {"dtype": "float32", "shape": (1,), "names": None}}
+    robot = make_robot_from_config(MockRobotConfig())
+    action_features = hw_to_dataset_features(robot.action_features, "action", True)
+    obs_features = hw_to_dataset_features(robot.observation_features, OBS_STR, True)
+    dataset_features = {**action_features, **obs_features}
     root_create = tmp_path / "create"
     dataset_create = LeRobotDataset.create(repo_id=DUMMY_REPO_ID, fps=30, features=features, root=root_create)
 
@@ -382,7 +387,7 @@ def test_factory(env_name, repo_id, policy_name):
         ("frame_index", 0, True),
         ("timestamp", 0, True),
         # TODO(rcadene): should we rename it agent_pos?
-        ("observation.state", 1, True),
+        (OBS_STATE, 1, True),
         ("next.reward", 0, False),
         ("next.done", 0, False),
     ]
@@ -584,18 +589,349 @@ def test_create_branch():
     api.delete_repo(repo_id, repo_type=repo_type)
 
 
-def test_dataset_feature_with_forward_slash_raises_error():
-    # make sure dir does not exist
-    from lerobot.constants import HF_LEROBOT_HOME
+def test_check_cached_episodes_sufficient(tmp_path, lerobot_dataset_factory):
+    """Test the _check_cached_episodes_sufficient method of LeRobotDataset."""
+    # Create a dataset with 5 episodes (0-4)
+    dataset = lerobot_dataset_factory(
+        root=tmp_path / "test",
+        total_episodes=5,
+        total_frames=200,
+        use_videos=False,
+    )
 
-    dataset_dir = HF_LEROBOT_HOME / "lerobot/test/with/slash"
-    # make sure does not exist
-    if dataset_dir.exists():
-        dataset_dir.rmdir()
+    # Test hf_dataset is None
+    dataset.hf_dataset = None
+    assert dataset._check_cached_episodes_sufficient() is False
 
-    with pytest.raises(ValueError):
-        LeRobotDataset.create(
-            repo_id="lerobot/test/with/slash",
-            fps=30,
-            features={"a/b": {"dtype": "float32", "shape": 2, "names": None}},
+    # Test hf_dataset is empty
+    import datasets
+
+    empty_features = get_hf_features_from_features(dataset.features)
+    dataset.hf_dataset = datasets.Dataset.from_dict(
+        {key: [] for key in empty_features}, features=empty_features
+    )
+    dataset.hf_dataset.set_transform(hf_transform_to_torch)
+    assert dataset._check_cached_episodes_sufficient() is False
+
+    # Restore the original dataset for remaining tests
+    dataset.hf_dataset = dataset.load_hf_dataset()
+
+    # Test all episodes requested (self.episodes = None) and all are available
+    dataset.episodes = None
+    assert dataset._check_cached_episodes_sufficient() is True
+
+    # Test specific episodes requested that are all available
+    dataset.episodes = [0, 2, 4]
+    assert dataset._check_cached_episodes_sufficient() is True
+
+    # Test request episodes that don't exist in the cached dataset
+    # Create a dataset with only episodes 0, 1, 2
+    limited_dataset = lerobot_dataset_factory(
+        root=tmp_path / "limited",
+        total_episodes=3,
+        total_frames=120,
+        use_videos=False,
+    )
+
+    # Request episodes that include non-existent ones
+    limited_dataset.episodes = [0, 1, 2, 3, 4]
+    assert limited_dataset._check_cached_episodes_sufficient() is False
+
+    # Test create a dataset with sparse episodes (e.g., only episodes 0, 2, 4)
+    # First create the full dataset structure
+    sparse_dataset = lerobot_dataset_factory(
+        root=tmp_path / "sparse",
+        total_episodes=5,
+        total_frames=200,
+        use_videos=False,
+    )
+
+    # Manually filter hf_dataset to only include episodes 0, 2, 4
+    episode_indices = sparse_dataset.hf_dataset["episode_index"]
+    mask = torch.zeros(len(episode_indices), dtype=torch.bool)
+    for ep in [0, 2, 4]:
+        mask |= torch.tensor(episode_indices) == ep
+
+    # Create a filtered dataset
+    filtered_data = {}
+    # Find image keys by checking features
+    image_keys = [key for key, ft in sparse_dataset.features.items() if ft.get("dtype") == "image"]
+
+    for key in sparse_dataset.hf_dataset.column_names:
+        values = sparse_dataset.hf_dataset[key]
+        # Filter values based on mask
+        filtered_values = [val for i, val in enumerate(values) if mask[i]]
+
+        # Convert float32 image tensors back to uint8 numpy arrays for HuggingFace dataset
+        if key in image_keys and len(filtered_values) > 0:
+            # Convert torch tensors (float32, [0, 1], CHW) back to numpy arrays (uint8, [0, 255], HWC)
+            filtered_values = [
+                (val.permute(1, 2, 0).numpy() * 255).astype(np.uint8) for val in filtered_values
+            ]
+
+        filtered_data[key] = filtered_values
+
+    sparse_dataset.hf_dataset = datasets.Dataset.from_dict(
+        filtered_data, features=get_hf_features_from_features(sparse_dataset.features)
+    )
+    sparse_dataset.hf_dataset.set_transform(hf_transform_to_torch)
+
+    # Test requesting all episodes when only some are cached
+    sparse_dataset.episodes = None
+    assert sparse_dataset._check_cached_episodes_sufficient() is False
+
+    # Test requesting only the available episodes
+    sparse_dataset.episodes = [0, 2, 4]
+    assert sparse_dataset._check_cached_episodes_sufficient() is True
+
+    # Test requesting a mix of available and unavailable episodes
+    sparse_dataset.episodes = [0, 1, 2]
+    assert sparse_dataset._check_cached_episodes_sufficient() is False
+
+
+def test_update_chunk_settings(tmp_path, empty_lerobot_dataset_factory):
+    """Test the update_chunk_settings functionality for both LeRobotDataset and LeRobotDatasetMetadata."""
+    features = {
+        OBS_STATE: {
+            "dtype": "float32",
+            "shape": (6,),
+            "names": ["shoulder_pan", "shoulder_lift", "elbow", "wrist_1", "wrist_2", "wrist_3"],
+        },
+        "action": {
+            "dtype": "float32",
+            "shape": (6,),
+            "names": ["shoulder_pan", "shoulder_lift", "elbow", "wrist_1", "wrist_2", "wrist_3"],
+        },
+    }
+
+    # Create dataset with default chunk settings
+    dataset = empty_lerobot_dataset_factory(root=tmp_path / "test", features=features)
+
+    # Test initial default values
+    initial_settings = dataset.meta.get_chunk_settings()
+    assert initial_settings["chunks_size"] == DEFAULT_CHUNK_SIZE
+    assert initial_settings["data_files_size_in_mb"] == DEFAULT_DATA_FILE_SIZE_IN_MB
+    assert initial_settings["video_files_size_in_mb"] == DEFAULT_VIDEO_FILE_SIZE_IN_MB
+
+    # Test updating all settings at once
+    new_chunks_size = 2000
+    new_data_size = 200
+    new_video_size = 1000
+
+    dataset.meta.update_chunk_settings(
+        chunks_size=new_chunks_size,
+        data_files_size_in_mb=new_data_size,
+        video_files_size_in_mb=new_video_size,
+    )
+
+    # Verify settings were updated
+    updated_settings = dataset.meta.get_chunk_settings()
+    assert updated_settings["chunks_size"] == new_chunks_size
+    assert updated_settings["data_files_size_in_mb"] == new_data_size
+    assert updated_settings["video_files_size_in_mb"] == new_video_size
+
+    # Test updating individual settings
+    dataset.meta.update_chunk_settings(chunks_size=1500)
+    settings_after_partial = dataset.meta.get_chunk_settings()
+    assert settings_after_partial["chunks_size"] == 1500
+    assert settings_after_partial["data_files_size_in_mb"] == new_data_size
+    assert settings_after_partial["video_files_size_in_mb"] == new_video_size
+
+    # Test updating only data file size
+    dataset.meta.update_chunk_settings(data_files_size_in_mb=150)
+    settings_after_data = dataset.meta.get_chunk_settings()
+    assert settings_after_data["chunks_size"] == 1500
+    assert settings_after_data["data_files_size_in_mb"] == 150
+    assert settings_after_data["video_files_size_in_mb"] == new_video_size
+
+    # Test updating only video file size
+    dataset.meta.update_chunk_settings(video_files_size_in_mb=800)
+    settings_after_video = dataset.meta.get_chunk_settings()
+    assert settings_after_video["chunks_size"] == 1500
+    assert settings_after_video["data_files_size_in_mb"] == 150
+    assert settings_after_video["video_files_size_in_mb"] == 800
+
+    # Test that settings persist in the info file
+    info_path = dataset.root / "meta" / "info.json"
+    assert info_path.exists()
+
+    # Verify the underlying metadata properties
+    assert dataset.meta.chunks_size == 1500
+    assert dataset.meta.data_files_size_in_mb == 150
+    assert dataset.meta.video_files_size_in_mb == 800
+
+    # Test error handling for invalid values
+    with pytest.raises(ValueError, match="chunks_size must be positive"):
+        dataset.meta.update_chunk_settings(chunks_size=0)
+
+    with pytest.raises(ValueError, match="chunks_size must be positive"):
+        dataset.meta.update_chunk_settings(chunks_size=-100)
+
+    with pytest.raises(ValueError, match="data_files_size_in_mb must be positive"):
+        dataset.meta.update_chunk_settings(data_files_size_in_mb=0)
+
+    with pytest.raises(ValueError, match="data_files_size_in_mb must be positive"):
+        dataset.meta.update_chunk_settings(data_files_size_in_mb=-50)
+
+    with pytest.raises(ValueError, match="video_files_size_in_mb must be positive"):
+        dataset.meta.update_chunk_settings(video_files_size_in_mb=0)
+
+    with pytest.raises(ValueError, match="video_files_size_in_mb must be positive"):
+        dataset.meta.update_chunk_settings(video_files_size_in_mb=-200)
+
+    # Test calling with None values (should not change anything)
+    settings_before_none = dataset.meta.get_chunk_settings()
+    dataset.meta.update_chunk_settings(
+        chunks_size=None, data_files_size_in_mb=None, video_files_size_in_mb=None
+    )
+    settings_after_none = dataset.meta.get_chunk_settings()
+    assert settings_before_none == settings_after_none
+
+    # Test metadata direct access
+    meta_settings = dataset.meta.get_chunk_settings()
+    assert meta_settings == dataset.meta.get_chunk_settings()
+
+    # Test updating via metadata directly
+    dataset.meta.update_chunk_settings(chunks_size=3000)
+    assert dataset.meta.get_chunk_settings()["chunks_size"] == 3000
+
+
+def test_update_chunk_settings_video_dataset(tmp_path):
+    """Test update_chunk_settings with a video dataset to ensure video-specific logic works."""
+    features = {
+        f"{OBS_IMAGES}.cam": {
+            "dtype": "video",
+            "shape": (480, 640, 3),
+            "names": ["height", "width", "channels"],
+        },
+        "action": {"dtype": "float32", "shape": (6,), "names": ["j1", "j2", "j3", "j4", "j5", "j6"]},
+    }
+
+    # Create video dataset
+    dataset = LeRobotDataset.create(
+        repo_id=DUMMY_REPO_ID, fps=30, features=features, root=tmp_path / "video_test", use_videos=True
+    )
+
+    # Test that video-specific settings work
+    original_video_size = dataset.meta.get_chunk_settings()["video_files_size_in_mb"]
+    new_video_size = original_video_size * 2
+
+    dataset.meta.update_chunk_settings(video_files_size_in_mb=new_video_size)
+    assert dataset.meta.get_chunk_settings()["video_files_size_in_mb"] == new_video_size
+    assert dataset.meta.video_files_size_in_mb == new_video_size
+
+
+def test_episode_index_distribution(tmp_path, empty_lerobot_dataset_factory):
+    """Test that all frames have correct episode indices across multiple episodes."""
+    features = {"state": {"dtype": "float32", "shape": (2,), "names": None}}
+    dataset = empty_lerobot_dataset_factory(root=tmp_path / "test", features=features, use_videos=False)
+
+    # Create 3 episodes with different lengths
+    num_episodes = 3
+    frames_per_episode = [10, 15, 8]
+
+    for episode_idx in range(num_episodes):
+        for _ in range(frames_per_episode[episode_idx]):
+            dataset.add_frame({"state": torch.randn(2), "task": f"task_{episode_idx}"})
+        dataset.save_episode()
+
+    # Load the dataset and check episode indices
+    loaded_dataset = LeRobotDataset(dataset.repo_id, root=dataset.root)
+
+    # Check specific frames across episode boundaries
+    cumulative = 0
+    for ep_idx, ep_length in enumerate(frames_per_episode):
+        # Check start, middle, and end of each episode
+        start_frame = cumulative
+        middle_frame = cumulative + ep_length // 2
+        end_frame = cumulative + ep_length - 1
+
+        for frame_idx in [start_frame, middle_frame, end_frame]:
+            frame_data = loaded_dataset[frame_idx]
+            actual_ep_idx = frame_data["episode_index"].item()
+            assert actual_ep_idx == ep_idx, (
+                f"Frame {frame_idx} has episode_index {actual_ep_idx}, should be {ep_idx}"
+            )
+
+        cumulative += ep_length
+
+    # Check episode index distribution
+    all_episode_indices = [loaded_dataset[i]["episode_index"].item() for i in range(len(loaded_dataset))]
+    from collections import Counter
+
+    distribution = Counter(all_episode_indices)
+    expected_dist = {i: frames_per_episode[i] for i in range(num_episodes)}
+
+    assert dict(distribution) == expected_dist, (
+        f"Episode distribution {dict(distribution)} != expected {expected_dist}"
+    )
+
+
+def test_multi_episode_metadata_consistency(tmp_path, empty_lerobot_dataset_factory):
+    """Test episode metadata consistency across multiple episodes."""
+    features = {
+        "state": {"dtype": "float32", "shape": (3,), "names": ["x", "y", "z"]},
+        "action": {"dtype": "float32", "shape": (2,), "names": ["v", "w"]},
+    }
+    dataset = empty_lerobot_dataset_factory(root=tmp_path / "test", features=features, use_videos=False)
+
+    num_episodes = 4
+    frames_per_episode = [20, 35, 10, 25]
+    tasks = ["pick", "place", "pick", "place"]
+
+    for episode_idx in range(num_episodes):
+        for _ in range(frames_per_episode[episode_idx]):
+            dataset.add_frame({"state": torch.randn(3), "action": torch.randn(2), "task": tasks[episode_idx]})
+        dataset.save_episode()
+
+    # Load and validate episode metadata
+    loaded_dataset = LeRobotDataset(dataset.repo_id, root=dataset.root)
+
+    assert loaded_dataset.meta.total_episodes == num_episodes
+    assert loaded_dataset.meta.total_frames == sum(frames_per_episode)
+
+    cumulative_frames = 0
+    for episode_idx in range(num_episodes):
+        episode_metadata = loaded_dataset.meta.episodes[episode_idx]
+
+        # Check basic episode properties
+        assert episode_metadata["episode_index"] == episode_idx
+        assert episode_metadata["length"] == frames_per_episode[episode_idx]
+        assert episode_metadata["tasks"] == [tasks[episode_idx]]
+
+        # Check dataset indices
+        expected_from = cumulative_frames
+        expected_to = cumulative_frames + frames_per_episode[episode_idx]
+
+        assert episode_metadata["dataset_from_index"] == expected_from
+        assert episode_metadata["dataset_to_index"] == expected_to
+
+        cumulative_frames += frames_per_episode[episode_idx]
+
+
+def test_data_consistency_across_episodes(tmp_path, empty_lerobot_dataset_factory):
+    """Test that episodes have no gaps or overlaps in their data indices."""
+    features = {"state": {"dtype": "float32", "shape": (1,), "names": None}}
+    dataset = empty_lerobot_dataset_factory(root=tmp_path / "test", features=features, use_videos=False)
+
+    num_episodes = 5
+    frames_per_episode = [12, 8, 20, 15, 5]
+
+    for episode_idx in range(num_episodes):
+        for _ in range(frames_per_episode[episode_idx]):
+            dataset.add_frame({"state": torch.randn(1), "task": "consistency_test"})
+        dataset.save_episode()
+
+    loaded_dataset = LeRobotDataset(dataset.repo_id, root=dataset.root)
+
+    # Check data consistency - no gaps or overlaps
+    cumulative_check = 0
+    for episode_idx in range(num_episodes):
+        episode_metadata = loaded_dataset.meta.episodes[episode_idx]
+        from_idx = episode_metadata["dataset_from_index"]
+        to_idx = episode_metadata["dataset_to_index"]
+
+        # Check that episode starts exactly where previous ended
+        assert from_idx == cumulative_check, (
+            f"Episode {episode_idx} starts at {from_idx}, expected {cumulative_check}"
         )
