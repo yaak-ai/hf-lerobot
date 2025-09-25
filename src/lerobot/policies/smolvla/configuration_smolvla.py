@@ -106,6 +106,10 @@ class SmolVLAConfig(PreTrainedConfig):
     use_separate_intent: bool = False  # Whether to use separate intent projection
     max_intent_dim: int = 32  # Maximum intent dimension. Used to pad the intent vector to this size.
 
+    # State masking
+    use_state_masking: bool = False  # Whether to use state masking in the model
+    state_masking_probability: float = 0.25  # Probability of masking the state
+
     # Image normalization
     use_image_norm: int = 1  # 0: no normalization, 1: scale by sqrt(d), 2: L2 normalize
     use_masked_loss: bool = False  # Whether to use masked loss for the action prediction

@@ -73,6 +73,7 @@ from lerobot.policies.normalize import (
 from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.policies.smolvla.configuration_smolvla import SmolVLAConfig
 from lerobot.policies.smolvla.conversion_utils_yaak import merge_waypoints_speed_as_state
+from lerobot.policies.smolvla.modeling_smolvla_yaak import ModalityDropout
 from lerobot.policies.smolvla.smolvlm_with_expert import SmolVLMWithExpertModel
 from lerobot.policies.utils import (
     populate_queues,
@@ -734,10 +735,11 @@ class VLAFlowMatching(nn.Module):
             self_attn_every_n_layers=self.config.self_attn_every_n_layers,
             expert_width_multiplier=self.config.expert_width_multiplier,
         )
+        self.use_state_masking = False if not hasattr(self.config, "use_state_masking") else self.config.use_state_masking
         self.state_proj = nn.Linear(
             self.config.max_state_dim, self.vlm_with_expert.config.text_config.hidden_size
-        )
-        # Needs to ne initialized here (not at the end) because of set_requires_grad
+        ) if not self.use_state_masking else ModalityDropout(self.config.max_state_dim, self.vlm_with_expert.config.text_config.hidden_size, self.config.state_masking_probability)
+        # Needs to be initialized here (not at the end) because of set_requires_grad
         self.use_separate_intent = False if not hasattr(self.config, "use_separate_intent") else self.config.use_separate_intent
         self.intent_proj = nn.Linear(
             self.config.max_intent_dim, self.vlm_with_expert.config.text_config.hidden_size

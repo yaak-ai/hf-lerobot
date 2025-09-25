@@ -126,6 +126,8 @@ def make_cfg_smolvla_clip(
         use_image_norm=hydra_cfg.model.use_image_norm,
         use_masked_loss=hydra_cfg.model.use_masked_loss,
         use_acc_loss=hydra_cfg.model.use_acc_loss,
+        use_state_masking=hydra_cfg.model.use_state_masking,
+        state_masking_probability=hydra_cfg.model.state_masking_probability,
         push_to_hub=False,
         # vision encoder options
         freeze_vision_encoder=hydra_cfg.model.freeze_vision_encoder,
