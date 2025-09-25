@@ -266,12 +266,14 @@ samples:
               normalized_geometries AS (
                 SELECT
                   *,
+                  ST_Rotate(
                     ST_Translate(
                       waypoints_geom,
                       - ST_X(ego_geom),
                       - ST_Y(ego_geom)
-                    )
-                    AS normalized_waypoints_geom
+                    ),
+                    radians("waypoints/heading")
+                  ) AS normalized_waypoints_geom
                 FROM
                   base_data
               )
