@@ -38,4 +38,4 @@ use_acc_loss: False
 # Logging params
 log_freq: 50
 eval_freq: 10000
-train_run: train_smolvla_rmind_waypoints_mask_speed_chunk_6_separate
+train_run: train_smolvla_rmind_waypoints_rotated_mask_speed_chunk_6_separate
