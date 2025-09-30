@@ -160,7 +160,7 @@ def __getbatch__(a: dict) -> dict:  # noqa: N807
         else a.data["cam_front_left"]
     )
     batch["observation.images.front_left"] = (
-        img.permute(0, 1, 4, 2, 3).type(torch.float32) / 255
+        torch.zeros_like(img).permute(0, 1, 4, 2, 3).type(torch.float32) / 255
     )
     # Handling longer contexts (ndim == 3) and single timestamps (ndim == 2)
     batch["observation.state.waypoints"] = (
