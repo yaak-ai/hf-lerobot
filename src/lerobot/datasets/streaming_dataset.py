@@ -498,7 +498,7 @@ class StreamingLeRobotDataset(torch.utils.data.IterableDataset):
 
                 # add batch dimension for stacking
                 if type(frame) is float:
-                    frame = torch.tensor([float])
+                    frame = torch.tensor([frame])
                 target_frames.append(frame)  # frame.unsqueeze(0))
                 is_pad.append(is_padded)
 
