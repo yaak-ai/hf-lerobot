@@ -421,6 +421,7 @@ class SmolVLAPolicy(PreTrainedPolicy):
         actions = pad_vector(batch[ACTION], self.config.max_action_dim)
         return actions
 
+
 def pad_tensor(tensor, max_len, pad_value=0):
     """
     Efficiently pads a tensor along sequence dimension to match max_len.
