@@ -412,29 +412,14 @@ class SmolVLAPolicy(PreTrainedPolicy):
 
     def prepare_state(self, batch):
         """Pad state"""
-        state = []
-        for k, v in batch.items():
-            if OBS_STATE not in k or "pad" in k:
-                continue
-            if v.ndim > 3:
-                v = torch.flatten(v, start_dim=2)
-            state.append(v)
-        state = torch.cat(state, dim=-1)
-        state = state[:, -1, :] if state.ndim > 2 else state
+        state = batch[OBS_STATE][:, -1, :] if batch[OBS_STATE].ndim > 2 else batch[OBS_STATE]
         state = pad_vector(state, self.config.max_state_dim)
         return state
 
     def prepare_action(self, batch):
         """Pad action"""
-        actions = []
-        for k, v in batch.items():
-            if ACTION not in k or "pad" in k:
-                continue
-            actions.append(v)
-        actions = torch.cat(actions, dim=-1)
-        actions = pad_vector(actions, self.config.max_action_dim)
+        actions = pad_vector(batch[ACTION], self.config.max_action_dim)
         return actions
-
 
 def pad_tensor(tensor, max_len, pad_value=0):
     """
