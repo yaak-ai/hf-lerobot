@@ -414,8 +414,10 @@ class SmolVLAPolicy(PreTrainedPolicy):
         """Pad state"""
         state = []
         for k, v in batch.items():
-            if OBS_STATE not in k:
+            if OBS_STATE not in k or "pad" in k:
                 continue
+            if v.ndim > 3:
+                v = torch.flatten(v, start_dim=2)
             state.append(v)
         state = torch.cat(state, dim=-1)
         state = state[:, -1, :] if state.ndim > 2 else state
@@ -426,7 +428,7 @@ class SmolVLAPolicy(PreTrainedPolicy):
         """Pad action"""
         actions = []
         for k, v in batch.items():
-            if ACTION not in k:
+            if ACTION not in k or "pad" in k:
                 continue
             actions.append(v)
         actions = torch.cat(actions, dim=-1)
