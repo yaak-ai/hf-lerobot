@@ -1,5 +1,5 @@
 defaults:
-  - /dataset: yaak/predict_clip
+  - /dataset: yaak/act_clip
   # - /dataset: yaak/inertia/predict_reye_27 # used for model evaluation without clip 
   # - /dataset: yaak/inertia/train_clip_inertia_brake.yaml # for model inertia tesing
   - _self_
