@@ -1,0 +1,13 @@
+# @package _global_
+
+defaults:
+
+  - /dataset: yaak/act_clip
+  - /datamodule_val: yaak/metric
+  - /paths: yaak/default
+  - /normalization: original
+  - /model: predictability_train
+  - _self_
+
+embedding_dim: 512
+
