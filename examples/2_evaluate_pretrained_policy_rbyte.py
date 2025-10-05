@@ -26,7 +26,7 @@ def _eval_yaak(hydra_cfg: DictConfig) -> None:
 
     output_dir = (
         Path("/nasa/team-space/artifacts/predictions/lerobot/")
-        / Path(hydra_cfg.model.artifact).name / "same_noise_holdout_clip"
+        / Path(hydra_cfg.model.artifact).name / "same_noise_act_clip"
     )
     output_dir.mkdir(parents=True, exist_ok=True)
     samples.write_parquet(output_dir / "dataset.parquet.bak")  # noqa: ERA001
