@@ -1,13 +1,14 @@
 defaults:
-  - /dataset: yaak/act_clip
+  - /dataset: yaak/holdout_clip
+  # yaak/act_clip
   # - /dataset: yaak/inertia/predict_reye_27 # used for model evaluation without clip 
   # - /dataset: yaak/inertia/train_clip_inertia_brake.yaml # for model inertia tesing
   - _self_
 
 _target_: torch.utils.data.DataLoader
-batch_size: 16
+batch_size: 32
 shuffle: false
-num_workers: 8
+num_workers: 32
 pin_memory: false
 persistent_workers: true
 multiprocessing_context: forkserver
