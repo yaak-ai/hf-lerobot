@@ -1,5 +1,9 @@
-_target_: lerobot.utils.action_predictability.MLP
-input_dim: 18
-hidden_dim: 512
-output_dim: 3
+judge:
+  _target_: lerobot.utils.action_predictability.MLP
+  input_dim: 18
+  hidden_dim: 512
+  output_dim: 3
+
+learner:
+  reye_path: /nasa/team-space/artifacts/predictions/lerobot/policy_smolvla-seed_1000-dataset_yaak-ai_L2D-300000:v14/same_noise_act_clip
 

@@ -62,7 +62,9 @@ def __getdataloader__(dataset: pl.DataFrame, batch_size=2048):
             ),
             axis=-1,
         )
-    ).to(dtype=torch.float32)[:, 0, :]
+    ).to(dtype=torch.float32)
+    if y.ndim == 3:
+        y = y[:, 0, :]
     return DataLoader(TensorDataset(x, y), batch_size=batch_size, shuffle=True)
 
 
@@ -73,7 +75,7 @@ def batch_mlp_corr(
     train_run: str,
     num_epochs: int = 10,
     batch_size: int = 2048,
-) -> None:
+) -> tuple[Path, list[float], list[float]]:
     train_dataloader = __getdataloader__(dataset, batch_size)
     val_dataloader = __getdataloader__(dataset_val, batch_size)
 
@@ -120,3 +122,4 @@ def batch_mlp_corr(
     save_training_state(
         checkpoint_dir, num_epochs * len(train_dataloader), optimizer, None
     )
+    return checkpoint_dir, train_losses, val_losses
