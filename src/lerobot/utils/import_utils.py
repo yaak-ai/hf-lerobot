@@ -15,6 +15,10 @@
 # limitations under the License.
 import importlib
 import logging
+import pkgutil
+from typing import Any
+
+from draccus.choice_types import ChoiceRegistry
 
 
 def is_package_available(pkg_name: str, return_version: bool = False) -> tuple[bool, str] | bool:
@@ -59,7 +63,6 @@ def is_package_available(pkg_name: str, return_version: bool = False) -> tuple[b
 
 _torch_available, _torch_version = is_package_available("torch", return_version=True)
 _transformers_available = is_package_available("transformers")
-_peft_available = is_package_available("peft")
 
 
 def make_device_from_device_class(config: ChoiceRegistry) -> Any:
