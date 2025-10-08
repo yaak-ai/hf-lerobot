@@ -1,17 +1,9 @@
 #@yaml/text-templated-strings
 
 #@ drives = [
-#@     'Niro102-HQ/2022-12-03--11-30-20',
-#@     'Niro108-HQ/2023-04-18--07-21-18',
-#@     'Niro108-HQ/2023-04-18--07-47-30',
-#@     'Niro108-HQ/2023-05-24--06-29-45',
-#@     'Niro112-HQ/2023-05-04--17-56-07',
-#@     'Niro115-HQ/2023-05-13--09-36-16',
-#@     'Niro115-HQ/2023-05-13--12-10-31',
-#@     'Niro115-HQ/2023-05-13--12-35-05',
-#@     'Niro115-HQ/2023-05-13--13-18-18',
-#@     'Niro115-HQ/2023-05-16--10-47-33',
-#@     'Niro122-HQ/2023-04-05--12-06-39',
+#@        'Niro127-HQ/2023-06-22--05-01-12',
+#@        'Niro105-HQ/2023-06-22--05-08-49',
+#@        'Niro105-HQ/2023-06-22--05-34-00',
 #@ ]
 
 
@@ -342,7 +334,7 @@ samples:
         func:
           _target_: rbyte.io.DataFrameGroupByDynamic
           index_column: meta/ImageMetadata.cam_front_left/frame_idx
-          every: 1i
+          every: 10i
           period: 101i
           closed: left
           gather_every: 1
