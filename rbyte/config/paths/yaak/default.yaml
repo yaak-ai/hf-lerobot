@@ -3,5 +3,5 @@ rbyte:
   cache: .rbyte_cache_2
 # lerobot_stats_27: /nasa/drives/yaak/data/lerobot_metadata/dataset_stats_all_quantiles_flatten.json # rotated wp with rbyte bug
 # lerobot_stats_28: /nasa/drives/yaak/data/lerobot_metadata/dataset_stats_rbyte_28.json # separate heading
-# lerobot_stats_nr: /nasa/drives/yaak/data/lerobot_metadata/dataset_stats_not_rotated_30.json
-lerobot_stats: /nasa/drives/yaak/data/lerobot_metadata/dataset_stats_rotation_30.json
+lerobot_stats: /nasa/drives/yaak/data/lerobot_metadata/dataset_stats_not_rotated_30.json
+# lerobot_stats: /nasa/drives/yaak/data/lerobot_metadata/dataset_stats_rotation_30.json
