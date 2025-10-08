@@ -3,7 +3,7 @@ export HATCH_BUILD_CLEAN := "1"
 export HYDRA_FULL_ERROR := "1"
 export TQDM_DISABLE := "1"
 export LEROBOT_TEST_DEVICE := "cuda"
-export CUDA_VISIBLE_DEVICES := "0"
+export CUDA_VISIBLE_DEVICES := "1"
 export HF_LEROBOT_HOME := "/nasa/3rd_party/lerobot"
 
 _default:
