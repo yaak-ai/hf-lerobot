@@ -5,9 +5,9 @@ defaults:
   - _self_
 
 _target_: torch.utils.data.DataLoader
-batch_size: 32
+batch_size: 128
 shuffle: false
-num_workers: 8
+num_workers: 64
 pin_memory: false
 persistent_workers: true
 multiprocessing_context: forkserver
