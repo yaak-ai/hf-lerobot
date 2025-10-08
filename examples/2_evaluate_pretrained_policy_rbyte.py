@@ -29,7 +29,7 @@ def _eval_yaak(hydra_cfg: DictConfig) -> None:
         / Path(hydra_cfg.model.artifact).name / "same_noise_act_clip"
     )
     output_dir.mkdir(parents=True, exist_ok=True)
-    samples.write_parquet(output_dir / "dataset.parquet.bak")  # noqa: ERA001
+    samples.write_parquet(output_dir / "dataset2.parquet.bak")  # noqa: ERA001
     logging.info(f"Writing results to: {output_dir}")  # noqa: G004
     policy, train_cfg = instantiate(hydra_cfg.model)
     predict_main_yaak(policy, dataloader_test, train_cfg, output_dir)

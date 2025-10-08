@@ -84,9 +84,8 @@ def _create_reye_columns(actions, is_without_clip: bool) -> list[pl.Expr]:
     return cols
 
 
-def create_reye_df(eval_dataloader: DataLoader, actions, is_without_clip: bool) -> pl.DataFrame:
-    cols = _create_reye_columns(actions, is_without_clip)
-    return eval_dataloader.dataset.samples.select(cols).with_columns([
+def _create_reye_df(df: pl.DataFrame, cols: list) -> pl.DataFrame:
+    return df.select(cols).with_columns([
         (
             (
                 pl.col("predictions/policy/prediction_value/continuous/gas_pedal")
@@ -109,3 +108,17 @@ def create_reye_df(eval_dataloader: DataLoader, actions, is_without_clip: bool) 
         .alias("predictions/policy/score_l1/discrete/turn_signal")
         .cast(pl.Float32),
     ])
+
+
+def create_reye_df(
+    eval_dataloader: DataLoader, actions, is_without_clip: bool
+) -> pl.DataFrame:
+    cols = _create_reye_columns(actions, is_without_clip)
+    return _create_reye_df(eval_dataloader.dataset.samples, cols)
+
+
+def create_reye_df_from_dataset(
+    eval_dataset: pl.DataFrame, actions, is_without_clip: bool
+) -> pl.DataFrame:
+    cols = _create_reye_columns(actions, is_without_clip)
+    return _create_reye_df(eval_dataset, cols)

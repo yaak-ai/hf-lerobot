@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from omegaconf import DictConfig
     from torch import Tensor
 
-    from rbyte import Dataset
+    from rbyte.rbyte_io import Dataset
 
 
 def patch_norm_mode(

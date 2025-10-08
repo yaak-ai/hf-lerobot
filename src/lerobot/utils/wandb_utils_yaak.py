@@ -12,6 +12,19 @@ if TYPE_CHECKING:
     from torch import Tensor
 
 
+def _gt_factory(samples: pl.DataFrame) -> tuple[list[str], np.ndarray]:
+    # Extract GT from DataFrame
+    action_names = [
+        "meta/VehicleMotion/gas_pedal_normalized",
+        "meta/VehicleMotion/brake_pedal_normalized",
+        "meta/VehicleMotion/steering_angle_normalized",
+    ]
+    gt_actions = np.stack([np.stack(samples[name]) for name in action_names], axis=2)[
+        :, 0, :
+    ]
+    return action_names, gt_actions
+
+
 def _get_nnz_actions(gt_actions):
     """Check if the actions Bx3 are non-zero to zoom in on the non-zero values."""
     # Thresholds are determied ad hoc
@@ -101,14 +114,7 @@ def metric_accum_callback(
     loss_accumulator = loss_accumulator.cpu()
 
     # Extract GT from DataFrame
-    action_names = [
-        "meta/VehicleMotion/gas_pedal_normalized",
-        "meta/VehicleMotion/brake_pedal_normalized",
-        "meta/VehicleMotion/steering_angle_normalized",
-    ]
-    gt_actions = np.stack([np.stack(samples[name]) for name in action_names], axis=2)[
-        :, 0, :
-    ]
+    action_names, gt_actions = _gt_factory(samples)
     nnz_accumulator = np.concatenate(_get_nnz_actions(gt_actions), axis=-1)
 
     # Collect scalar metrics for each action dimension
@@ -156,26 +162,33 @@ def _plot_losses_callback(
     caption: str | None = None,
 ) -> Image:
     """Plot the losses and actions over time for each action dimension."""
-    action_dim = loss_accumulator.shape[-1]
+    action_dim = (
+        loss_accumulator.shape[-1]
+        if loss_accumulator is not None
+        else gt_actions.shape[-1]
+    )
     n_rows = 1 + int(gt_actions is not None)
     fig_nnz, ax_nnz = plt.subplots(action_dim * n_rows, 1, figsize=(20, 20))
     fig_full, ax_full = plt.subplots(action_dim, 1, figsize=(20, 8))
+    is_nnz = nnz_accumulator is not None
     for i in range(action_dim):
-        ax_nnz[i * n_rows].plot(
-            loss_accumulator[nnz_accumulator[:, i], i].cpu().numpy(),
-            label=f"{action_names[i]} loss",
-        )
-        ax_nnz[i * n_rows].grid(True)
-        ax_nnz[i * n_rows].set_title(f"{action_names[i]} loss nnz")
+        if is_nnz:
+            ax_nnz[i * n_rows].plot(
+                loss_accumulator[nnz_accumulator[:, i], i].cpu().numpy(),
+                label=f"{action_names[i]} loss",
+            )
+            ax_nnz[i * n_rows].grid(True)
+            ax_nnz[i * n_rows].set_title(f"{action_names[i]} loss nnz")
         if gt_actions is not None:
             # plot actions in the nex row (zoom to nnz)
-            ax_nnz[i * n_rows + 1].plot(
-                gt_actions[nnz_accumulator[:, i], i],
-                label=f"{action_names[i]} gt",
-            )
-            ax_nnz[i * n_rows + 1].set_title(f"{action_names[i]} action nnz")
-            ax_nnz[i * n_rows + 1].set_ylim([0, 1] if i < 2 else [-1, 1])
-            ax_nnz[i * n_rows + 1].grid(True)
+            if is_nnz:
+                ax_nnz[i * n_rows + 1].plot(
+                    gt_actions[nnz_accumulator[:, i], i],
+                    label=f"{action_names[i]} gt",
+                )
+                ax_nnz[i * n_rows + 1].set_title(f"{action_names[i]} action nnz")
+                ax_nnz[i * n_rows + 1].set_ylim([0, 1] if i < 2 else [-1, 1])
+                ax_nnz[i * n_rows + 1].grid(True)
             # separate plot for all actions
             ax_full[i].set_title(f"{action_names[i]} action")
             ax_full[i].set_ylim([0, 1] if i < 2 else [-1, 1])
@@ -185,11 +198,12 @@ def _plot_losses_callback(
             )
         if pred_actions is not None:
             # plot predictions on the same graph as GT
-            ax_nnz[i * n_rows + 1].plot(
-                pred_actions[nnz_accumulator[:, i], i],
-                label=f"{action_names[i]} pred",
-                alpha=0.7,
-            )
+            if is_nnz:
+                ax_nnz[i * n_rows + 1].plot(
+                    pred_actions[nnz_accumulator[:, i], i],
+                    label=f"{action_names[i]} pred",
+                    alpha=0.7,
+                )
             ax_full[i].plot(
                 pred_actions[:, i],
                 label=f"{action_names[i]} pred",
@@ -202,3 +216,29 @@ def _plot_losses_callback(
     return Image(fig_nnz, caption=f"{caption}_nnz"), Image(  # noqa: DOC201
         fig_full, caption=f"{caption}_complete"
     )
+
+
+def action_callback(
+    samples: pl.DataFrame,
+    log_images: list[Image],
+    pred_actions: torch.Tensor | None = None,
+) -> None:
+    """At the end of eval step: collect the loss metrics and plot the losses."""
+
+    # Extract GT from DataFrame
+    action_names, gt_actions = _gt_factory(samples)
+
+    drives = samples["__input_id"]
+    unique_drives = drives.unique().to_list()
+    for drive in unique_drives:
+        drive_selector = drives == drive
+        images = _plot_losses_callback(
+            None,
+            None,
+            gt_actions[drive_selector, :],
+            action_names,
+            pred_actions[drive_selector, :],
+            caption=drive,
+        )
+        for img in images:
+            log_images.append(img)  # noqa: PERF402
