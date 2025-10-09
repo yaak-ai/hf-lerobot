@@ -1,7 +1,6 @@
 defaults:
-  - /dataset: yaak/predict_clip
-  # - /dataset: yaak/inertia/predict_reye_27 # used for model evaluation without clip 
-  # - /dataset: yaak/inertia/train_clip_inertia_brake.yaml # for model inertia tesing
+  - /dataset: yaak/bc_clip
+  # - /dataset: yaak/holdout_clip
   - _self_
 
 _target_: torch.utils.data.DataLoader

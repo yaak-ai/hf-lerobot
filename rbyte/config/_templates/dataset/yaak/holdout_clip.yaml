@@ -320,7 +320,7 @@ samples:
         func:
           _target_: rbyte.io.DataFrameGroupByDynamic
           index_column: meta/ImageMetadata.cam_front_left/frame_idx
-          every: 1i
+          every: 10i
           period: 101i
           closed: left
           gather_every: 1
@@ -365,8 +365,6 @@ samples:
                     AND list_max(list_slice("meta/VehicleMotion/brake_pedal_normalized", 1, 60, 10)) <= (1.0 / 164 + 0.001)
                     AND list_max(list_slice("meta/VehicleMotion/speed", 1, 60, 10)) >= 25.0
                     AND ("meta/VehicleMotion/speed")[51] - ("meta/VehicleMotion/speed")[1] >= -0.05 * list_avg(list_slice("meta/VehicleMotion/speed", 1, 60, 10))
-                )  AND (
-                    (list_stddev_samp(list_slice("meta/VehicleMotion/brake_pedal_normalized", 1, 60, 10)) < 1e-4 AND (("meta/VehicleMotion/brake_pedal_normalized")[52] - list_slice("meta/VehicleMotion/brake_pedal_normalized", 1, 60, 10)[6]) > 1.0 / 164 + 0.001)
                 )
 
       - _target_: pipefunc.PipeFunc
