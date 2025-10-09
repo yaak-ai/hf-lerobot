@@ -471,6 +471,8 @@ class LeRobotDataset(torch.utils.data.Dataset):
         if self.episodes is not None and self.meta._version >= packaging.version.parse("v2.1"):
             episodes_stats = [self.meta.episodes_stats[ep_idx] for ep_idx in self.episodes]
             self.stats = aggregate_stats(episodes_stats)
+        else:
+            self.episodes = [ep['episode_index'] for k, ep in self.meta.episodes.items()]
 
         # Load actual data
         try:
