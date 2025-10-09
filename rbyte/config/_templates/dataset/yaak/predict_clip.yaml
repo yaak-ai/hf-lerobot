@@ -339,7 +339,7 @@ samples:
         func:
           _target_: rbyte.io.DataFrameGroupByDynamic
           index_column: meta/ImageMetadata.cam_front_left/frame_idx
-          every: 1i
+          every: 10i
           period: 101i
           closed: left
           gather_every: 1
