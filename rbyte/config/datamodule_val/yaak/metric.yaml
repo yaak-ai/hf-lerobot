@@ -1,6 +1,6 @@
 defaults:
-  - /dataset: yaak/holdout_clip
-  # - /dataset: yaak/holdout_clip_sparse
+  # - /dataset: yaak/holdout_clip
+  - /dataset: yaak/holdout_clip_sparse
   - _self_
 
 _target_: torch.utils.data.DataLoader

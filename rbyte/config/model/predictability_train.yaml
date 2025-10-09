@@ -5,3 +5,9 @@ judge:
   output_dim: 3
 
 reye_dest: /nasa/team-space/artifacts/predictions/lerobot
+
+expert:
+  train_run: train_judge_expert_policy_t_10
+
+learner:
+  train_run: train_judge_learned_policy_t_10

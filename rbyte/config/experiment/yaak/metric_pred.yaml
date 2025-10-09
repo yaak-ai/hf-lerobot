@@ -3,7 +3,7 @@
 defaults:
 
   # - /dataset: yaak/act_clip
-  - /dataset: yaak/act_clip
+  - /dataset: yaak/act_clip_sparse
   - /datamodule_val: yaak/metric # Points to yaak/holdout_clip_sparse
   - /datamodule: yaak/metric # Points to yaak/bc_clip
   - /paths: yaak/default

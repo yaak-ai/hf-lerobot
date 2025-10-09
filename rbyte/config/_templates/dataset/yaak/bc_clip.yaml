@@ -2,7 +2,7 @@ samples:
   _target_: lerobot.utils.learned_pipeline.reye_monkey_patcher
   reye_pred_path: "/nasa/team-space/artifacts/predictions/lerobot/policy_smolvla-seed_1000-dataset_yaak-ai_L2D-300000:v14/all_stride_1/train_mlp"
   every: 10
-  period: 101
-  future: 52
-  # period: 111
-  # future: 61
+  # period: 101
+  # future: 52
+  period: 111
+  future: 61
