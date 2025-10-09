@@ -10,6 +10,7 @@
 #@     'Niro104-HQ/2023-04-27--08-23-53',
 #@ ]
 
+
 ---
 _target_: rbyte.Dataset
 _recursive_: false
@@ -323,7 +324,7 @@ samples:
           _target_: rbyte.io.DataFrameGroupByDynamic
           index_column: meta/ImageMetadata.cam_front_left/frame_idx
           every: 1i
-          period: 101i
+          period: 111i
           closed: left
           gather_every: 1
 
@@ -338,27 +339,30 @@ samples:
         bound:
           query: |
             SELECT
-                list_slice("meta/VehicleMotion/gas_pedal_normalized"::FLOAT[101], 1, 60, 10) AS "meta/VehicleMotion/gas_pedal_history",
-                list_slice("meta/VehicleMotion/brake_pedal_normalized"::FLOAT[101], 1, 60, 10) AS "meta/VehicleMotion/brake_pedal_history",
-                list_slice("meta/VehicleMotion/steering_angle_normalized"::FLOAT[101], 1, 60, 10) AS "meta/VehicleMotion/steering_angle_history",
-                list_slice("meta/ImageMetadata.cam_front_left/time_stamp"::TIMESTAMP[101], 1, 60, 10) AS "meta/ImageMetadata.cam_front_left/time_stamp",
-                list_slice("meta/ImageMetadata.cam_front_left/frame_idx"::INT32[101], 1, 60, 10) AS "meta/ImageMetadata.cam_front_left/frame_idx",
-                list_slice("meta/VehicleMotion/gas_pedal_normalized"::FLOAT[101],  52, 101, 1) AS "meta/VehicleMotion/gas_pedal_normalized",
-                list_slice("meta/VehicleMotion/brake_pedal_normalized"::FLOAT[101],  52, 101, 1) AS "meta/VehicleMotion/brake_pedal_normalized",
-                list_slice("meta/VehicleMotion/steering_angle_normalized"::FLOAT[101],  52, 101, 1) AS "meta/VehicleMotion/steering_angle_normalized",
-                flatten(("waypoints/xy_normalized"::FLOAT[2][10][101])[51]) AS "observation.state.waypoints",
+                ("meta/ImageMetadata.cam_front_left/time_stamp"::TIMESTAMP[111]) AS "full_time",
+                list_slice("meta/ImageMetadata.cam_front_left/time_stamp"::TIMESTAMP[111], 1, 60, 10) AS "meta/ImageMetadata.cam_front_left_past/time_stamp",
+                list_slice("meta/ImageMetadata.cam_front_left/time_stamp"::TIMESTAMP[111],  61, 111, 1) AS "meta/ImageMetadata.cam_front_left_future/time_stamp",
+                list_slice("meta/VehicleMotion/gas_pedal_normalized"::FLOAT[111], 1, 60, 10) AS "meta/VehicleMotion/gas_pedal_history",
+                list_slice("meta/VehicleMotion/brake_pedal_normalized"::FLOAT[111], 1, 60, 10) AS "meta/VehicleMotion/brake_pedal_history",
+                list_slice("meta/VehicleMotion/steering_angle_normalized"::FLOAT[111], 1, 60, 10) AS "meta/VehicleMotion/steering_angle_history",
+                list_slice("meta/ImageMetadata.cam_front_left/time_stamp"::TIMESTAMP[111], 1, 60, 10) AS "meta/ImageMetadata.cam_front_left/time_stamp",
+                list_slice("meta/ImageMetadata.cam_front_left/frame_idx"::INT32[111], 1, 60, 10) AS "meta/ImageMetadata.cam_front_left/frame_idx",
+                list_slice("meta/VehicleMotion/gas_pedal_normalized"::FLOAT[111],  61, 111, 1) AS "meta/VehicleMotion/gas_pedal_normalized",
+                list_slice("meta/VehicleMotion/brake_pedal_normalized"::FLOAT[111],  61, 111, 1) AS "meta/VehicleMotion/brake_pedal_normalized",
+                list_slice("meta/VehicleMotion/steering_angle_normalized"::FLOAT[111],  61, 111, 1) AS "meta/VehicleMotion/steering_angle_normalized",
+                flatten(("waypoints/xy_normalized"::FLOAT[2][10][111])[51]) AS "observation.state.waypoints",
                 'Follow the waypoints while adhering to traffic rules and regulations' as "task"
             FROM
                 samples
             WHERE
-                len("meta/ImageMetadata.cam_front_left/frame_idx") = 101
-                AND list_last("meta/ImageMetadata.cam_front_left/frame_idx") - list_first("meta/ImageMetadata.cam_front_left/frame_idx") == 100
+                len("meta/ImageMetadata.cam_front_left/frame_idx") = 111
+                AND list_last("meta/ImageMetadata.cam_front_left/frame_idx") - list_first("meta/ImageMetadata.cam_front_left/frame_idx") == 110
                 AND NOT (
                     list_max(list_slice("meta/VehicleMotion/gas_pedal_normalized", 1, 60, 10)) <= (1.0 / 255 + 0.001)
                     AND list_max(list_slice("meta/VehicleMotion/brake_pedal_normalized", 1, 60, 10)) <= (1.0 / 164 + 0.001)
                     AND list_max(list_slice("meta/VehicleMotion/speed", 1, 60, 10)) >= 25.0
                     AND ("meta/VehicleMotion/speed")[51] - ("meta/VehicleMotion/speed")[1] >= -0.05 * list_avg(list_slice("meta/VehicleMotion/speed", 1, 60, 10))
-                )   
+                )
 
       - _target_: pipefunc.PipeFunc
         renames:

@@ -1,29 +1,12 @@
 #@yaml/text-templated-strings
 
 #@ drives = [
-#@     'Niro104-HQ/2022-12-20--13-57-20',
-#@     'Niro111-HQ/2023-04-30--11-16-05',
-#@     'Niro111-HQ/2023-05-06--11-48-54',
-#@     'Niro111-HQ/2023-05-07--10-57-09',
-#@     'Niro111-HQ/2023-05-07--12-25-51',
-#@ ]
-
-#@ hold_drives = [
 #@     'G1-00428/2024-04-23--07-00-31',
-#@     'Niro112-HQ/2023-05-04--17-56-07',
-#@     'Niro111-HQ/2023-05-07--12-25-51',
-#@     'Niro108-HQ/2023-05-24--06-29-45',
-#@     'Niro115-HQ/2023-05-13--09-36-16',
+#@     'G1-00429/2024-04-22--13-35-09',
+#@     'G1-00436/2024-04-22--07-48-38',
 #@     'G1-00436/2024-04-22--15-59-18'
 #@ ]
 
-#@ all_drives = [
-#@     'Niro115-HQ/2023-05-16--10-47-33',
-#@     'Niro104-HQ/2022-12-20--13-57-20',
-#@     'Niro107-HQ/2023-05-12--12-05-15',
-#@     'Niro122-HQ/2023-04-05--12-06-39',
-#@     'Niro102-HQ/2022-12-03--11-30-20',
-#@ ]
 
 ---
 _target_: rbyte.Dataset
@@ -337,7 +320,7 @@ samples:
         func:
           _target_: rbyte.io.DataFrameGroupByDynamic
           index_column: meta/ImageMetadata.cam_front_left/frame_idx
-          every: 10i
+          every: 1i
           period: 101i
           closed: left
           gather_every: 1
@@ -359,6 +342,9 @@ samples:
         bound:
           query: |
             SELECT
+                ("meta/ImageMetadata.cam_front_left/time_stamp"::TIMESTAMP[101]) AS "full_time",
+                list_slice("meta/ImageMetadata.cam_front_left/time_stamp"::TIMESTAMP[101], 1, 60, 10) AS "meta/ImageMetadata.cam_front_left_past/time_stamp",
+                list_slice("meta/ImageMetadata.cam_front_left/time_stamp"::TIMESTAMP[101],  52, 101, 1) AS "meta/ImageMetadata.cam_front_left_future/time_stamp",
                 list_slice("meta/VehicleMotion/gas_pedal_normalized"::FLOAT[101], 1, 60, 10) AS "meta/VehicleMotion/gas_pedal_history",
                 list_slice("meta/VehicleMotion/brake_pedal_normalized"::FLOAT[101], 1, 60, 10) AS "meta/VehicleMotion/brake_pedal_history",
                 list_slice("meta/VehicleMotion/steering_angle_normalized"::FLOAT[101], 1, 60, 10) AS "meta/VehicleMotion/steering_angle_history",
@@ -380,9 +366,7 @@ samples:
                     AND list_max(list_slice("meta/VehicleMotion/speed", 1, 60, 10)) >= 25.0
                     AND ("meta/VehicleMotion/speed")[51] - ("meta/VehicleMotion/speed")[1] >= -0.05 * list_avg(list_slice("meta/VehicleMotion/speed", 1, 60, 10))
                 )  AND (
-                    abs(list_median(list_slice("meta/VehicleMotion/brake_pedal_normalized", 1, 60, 10)) - list_median(list_slice("meta/VehicleMotion/brake_pedal_normalized",  52, 101, 1))) > 0.12
-                    OR abs(list_median(list_slice("meta/VehicleMotion/gas_pedal_normalized", 1, 60, 10)) - list_median(list_slice("meta/VehicleMotion/gas_pedal_normalized",  52, 101, 1))) > 0.08
-                    OR abs(list_median(list_slice("meta/VehicleMotion/steering_angle_normalized", 1, 60, 10)) - list_median(list_slice("meta/VehicleMotion/steering_angle_normalized",  52, 101, 1))) > 0.08
+                    (list_stddev_samp(list_slice("meta/VehicleMotion/brake_pedal_normalized", 1, 60, 10)) < 1e-4 AND (("meta/VehicleMotion/brake_pedal_normalized")[52] - list_slice("meta/VehicleMotion/brake_pedal_normalized", 1, 60, 10)[6]) > 1.0 / 164 + 0.001)
                 )
 
       - _target_: pipefunc.PipeFunc
