@@ -159,9 +159,11 @@ def __getbatch__(a: dict) -> dict:  # noqa: N807
         if a.data["cam_front_left"].ndim == 4  # noqa: PLR2004
         else a.data["cam_front_left"]
     )
+    # images loaded from video are already B, S, C, H, W
+    # but images loaded from images are B, S, H, W, C
     batch["observation.images.front_left"] = (
         img.permute(0, 1, 4, 2, 3).type(torch.float32) / 255
-    )
+    ) if img.shape[-3] != 3 else img.type(torch.float32) / 255
     # Handling longer contexts (ndim == 3) and single timestamps (ndim == 2)
     batch["observation.state.waypoints"] = (
         a.data["observation.state.waypoints"][:, None, :]

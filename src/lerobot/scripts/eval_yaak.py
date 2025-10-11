@@ -137,19 +137,19 @@ def eval_policy_yaak_loop(
             if isinstance(batch[key], torch.Tensor):
                 batch[key] = batch[key].to(device, non_blocking=True)
         with torch.inference_mode():
-            loss, loss_dict = policy.forward(batch)
-            # accumulate losses to track stability
-            loss_accumulator[step * bsize : step * bsize + cur_bsize, :] = (
-                loss_dict.get(
-                    "loss_first_timestamp", torch.zeros((bsize, 1), device=device)
-                )
-            )
+            # loss, loss_dict = policy.forward(batch)
+            # # accumulate losses to track stability
+            # loss_accumulator[step * bsize : step * bsize + cur_bsize, :] = (
+            #     loss_dict.get(
+            #         "loss_first_timestamp", torch.zeros((bsize, 1), device=device)
+            #     )
+            # )
             if cur_bsize != bsize:
                 noise = noise_row.repeat(cur_bsize, 1, 1)
             pred_actions[step * bsize : step * bsize + cur_bsize, :] = (
                 policy.predict_action_chunk(batch, noise=noise.clone())[:, 0, :]
             )
-        eval_tracker.eval_loss = loss.item()
+        # eval_tracker.eval_loss = loss.item()
         eval_tracker.eval_update_s = time.perf_counter() - start_time
         eval_tracker.step()
         del batch
