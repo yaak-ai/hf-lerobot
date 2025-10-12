@@ -5,7 +5,7 @@ defaults:
   - _self_
 
 _target_: torch.utils.data.DataLoader
-batch_size: 32
+batch_size: 64
 shuffle: false
 num_workers: 32
 pin_memory: false
