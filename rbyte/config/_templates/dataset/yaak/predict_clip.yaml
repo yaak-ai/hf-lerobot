@@ -1,66 +1,20 @@
 #@yaml/text-templated-strings
 
+
 #@ drives = [
-#@     'Niro131-HQ/2023-06-14--14-05-20',
-#@     'Niro131-HQ/2023-06-15--11-00-06',
-#@     'Niro112-HQ/2023-06-16--09-18-20',
-#@     'Niro112-HQ/2023-06-13--13-44-01',
-#@     'Niro112-HQ/2023-06-19--16-17-37',
-#@     'Niro112-HQ/2023-06-19--12-20-56',
-#@     'Niro112-HQ/2023-06-16--08-45-21',
-#@ ]
-
-#@ test_drives = [
-#@     'Niro130-HQ/2023-06-16--14-02-43',
-#@     'Niro129-HQ/2023-06-20--06-40-48',
-#@     'Niro121-HQ/2023-06-14--17-03-50',
-#@     'Niro118-HQ/2023-06-21--13-24-48',
-#@     'Niro119-HQ/2023-06-20--14-08-45',
-#@ ]
-
-#@ all_drives = [
-#@     'Niro131-HQ/2023-06-14--14-05-20',
-#@     'Niro131-HQ/2023-06-15--11-00-06',
-#@     'Niro112-HQ/2023-06-16--09-18-20',
-#@     'Niro112-HQ/2023-06-13--13-44-01',
-#@     'Niro112-HQ/2023-06-19--16-17-37',
-#@     'Niro112-HQ/2023-06-19--12-20-56',
-#@     'Niro112-HQ/2023-06-16--08-45-21',
-#@     'NIRO107-HQ/2024-11-25--14-57-32',
-#@     'NIRO107-HQ/2024-11-06--15-26-02',
-#@     'NIRO107-HQ/2024-11-07--08-54-33',
-#@     'NIRO107-HQ/2024-11-06--15-06-48',
-#@     'Niro111-HQ/2023-06-13--12-48-50',
-#@     'Niro111-HQ/2023-06-13--10-26-57',
-#@     'Niro111-HQ/2023-06-15--05-24-51',
-#@     'Niro111-HQ/2023-06-19--09-50-30',
-#@ ]
-
-
-
-#@ val_drives = [
 #@     'Niro115-HQ/2023-05-16--10-47-33',
 #@     'Niro104-HQ/2022-12-20--13-57-20',
 #@     'Niro107-HQ/2023-05-12--12-05-15',
 #@     'Niro122-HQ/2023-04-05--12-06-39',
 #@     'Niro102-HQ/2022-12-03--11-30-20',
-#@     'Niro104-HQ/2023-04-27--08-23-53',
 #@ ]
-
-
-#@ pred_drives = [
-#@     'Niro096-HQ/2023-01-11--13-47-36',
-#@     'Niro115-HQ/2023-05-16--10-47-33',
-#@     'G1-00428/2024-04-23--07-00-31',
-#@ ]
-
 
 #@ all_drives = [
-#@     'Niro102-HQ/2022-12-03--11-30-20',
-#@     'Niro107-HQ/2023-05-12--12-05-15',
-#@     'Niro104-HQ/2022-12-20--13-57-20',
-#@     'Niro122-HQ/2023-04-05--12-06-39',
 #@     'Niro115-HQ/2023-05-16--10-47-33',
+#@     'Niro104-HQ/2022-12-20--13-57-20',
+#@     'Niro107-HQ/2023-05-12--12-05-15',
+#@     'Niro122-HQ/2023-04-05--12-06-39',
+#@     'Niro102-HQ/2022-12-03--11-30-20',
 #@ ]
 
 ---
@@ -74,18 +28,23 @@ sources:
     cam_front_left:
       index_column: "meta/ImageMetadata.cam_front_left/frame_idx"
       source:
-        _target_: rbyte.io.TorchCodecFrameSource
-        source: "${paths.data_tud}/(@=drive_id@)/cam_front_left.pii.mp4"
-        device: cpu
+        _target_: rbyte.io.PathTensorSource
+        path: "${paths.data}/(@=drive_id@)/frames/cam_front_left.pii.mp4/576x324/{:09d}.jpg"
+        decoder:
+          _target_: simplejpeg.decode_jpeg
+          _partial_: true
+          colorspace: rgb
+          fastdct: true
+          fastupsample: true
   #@ end
 
 samples:
   inputs:
     #@ for drive_id in drives:
     - input_id: (@=drive_id@)
-      yaak_metadata_path: ${paths.data_tud}/(@=drive_id@)/metadata.log
-      waypoints_path: ${paths.data_tud}/(@=drive_id@)/waypoints.json
-      cam_front_left_path: ${paths.data_tud}/(@=drive_id@)/cam_front_left.pii.mp4
+      yaak_metadata_path: ${paths.data}/(@=drive_id@)/metadata.log
+      waypoints_path: ${paths.data}/(@=drive_id@)/waypoints.json
+      cam_front_left_path: ${paths.data}/(@=drive_id@)/frames/cam_front_left.pii.mp4/576x324
     #@ end
 
   executor:
@@ -263,11 +222,14 @@ samples:
           path: cam_front_left_path
         output_name: cam_front_left_meta
         mapspec: "cam_front_left_path[i] -> cam_front_left_meta[i]"
+        cache: true
         func:
-          _target_: rbyte.io.VideoDataFrameBuilder
+          _target_: rbyte.io.PathDataFrameBuilder
+          pattern: (?<frame_idx>\d+).jpg
           fields:
             frame_idx:
               _target_: polars.Int32
+
 
       - _target_: pipefunc.PipeFunc
         output_name: filtered
@@ -399,7 +361,7 @@ samples:
                     AND list_max(list_slice("meta/VehicleMotion/brake_pedal_normalized", 1, 60, 10)) <= (1.0 / 164 + 0.001)
                     AND list_max(list_slice("meta/VehicleMotion/speed", 1, 60, 10)) >= 25.0
                     AND ("meta/VehicleMotion/speed")[51] - ("meta/VehicleMotion/speed")[1] >= -0.05 * list_avg(list_slice("meta/VehicleMotion/speed", 1, 60, 10))
-                )  
+                )   
 
       - _target_: pipefunc.PipeFunc
         renames:

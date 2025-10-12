@@ -202,7 +202,7 @@ def predict_policy_yaak(
     df = create_reye_df(
         eval_dataloader, pred_actions, is_without_clip=isinstance(ts, datetime.datetime)
     )
-    reye_path = reye_output_dir / "results.parquet"
+    reye_path = reye_output_dir / "results_val.parquet"
     df.write_parquet(reye_path)
     logging.info(f"Predictions saved to {reye_path}")  # noqa: G004
     return eval_tracker
