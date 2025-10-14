@@ -1,4 +1,5 @@
 data: /nasa/drives/yaak/data
+data_tud: /nasa/drives/tud/data
 rbyte:
   cache: .rbyte_cache_2
 # lerobot_stats_27: /nasa/drives/yaak/data/lerobot_metadata/dataset_stats_all_quantiles_flatten.json # rotated wp with rbyte bug

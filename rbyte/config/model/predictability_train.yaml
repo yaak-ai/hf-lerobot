@@ -3,11 +3,20 @@ judge:
   input_dim: 18
   hidden_dim: 512
   output_dim: 3
+  nr_hidden_layers: 0
 
 reye_dest: /nasa/team-space/artifacts/predictions/lerobot
 
 expert:
   train_run: train_judge_expert_policy_t_10
+  num_epochs: 10
+  batch_size: 2048
+  lr: 1e-3
+  weight_decay: 0
 
 learner:
   train_run: train_judge_learned_policy_t_10
+  num_epochs: 10
+  batch_size: 2048
+  lr: 1e-3
+  weight_decay: 1e-4
