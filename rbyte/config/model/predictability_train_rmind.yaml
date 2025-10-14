@@ -1,0 +1,14 @@
+judge:
+  _target_: lerobot.utils.action_predictability.MLP
+  input_dim: 18
+  hidden_dim: 1024
+  output_dim: 3
+  nr_hidden_layers: 3
+
+reye_dest: /nasa/team-space/artifacts/predictions/lerobot
+
+expert:
+  train_run: train_expert_rmind_t_10
+  num_epochs: 10
+  batch_size: 2048
+  lr: 1e-3

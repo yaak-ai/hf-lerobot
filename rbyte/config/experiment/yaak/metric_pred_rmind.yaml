@@ -1,0 +1,10 @@
+# @package _global_
+
+defaults:
+
+  # - /dataset: yaak/act_clip
+  - /dataset: yaak/act_clip_rmind_sparse
+  - /datamodule_val: yaak/metric_rmind # Points to yaak/holdout_clip_sparse
+  - /paths: yaak/default
+  - /model: predictability_train_rmind
+  - _self_
