@@ -8,15 +8,15 @@ judge:
 reye_dest: /nasa/team-space/artifacts/predictions/lerobot
 
 expert:
-  train_run: train_judge_expert_policy_t_10
+  train_run: expert_rmind_t_10
   num_epochs: 10
   batch_size: 2048
   lr: 1e-3
   weight_decay: 0
 
 learner:
-  train_run: train_judge_learned_policy_t_10
+  train_run: learner_rmind_t_10
   num_epochs: 10
   batch_size: 2048
   lr: 1e-3
-  weight_decay: 1e-4
+  weight_decay: 0
