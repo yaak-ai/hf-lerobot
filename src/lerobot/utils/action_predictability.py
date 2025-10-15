@@ -17,7 +17,10 @@ from torch.utils.data import DataLoader, TensorDataset
 from lerobot.constants import CHECKPOINTS_DIR, PRETRAINED_MODEL_DIR
 from lerobot.policies.utils import get_device_from_parameters
 from lerobot.utils.hub import HubMixin
-from lerobot.utils.reye_utils import create_reye_df_from_dataset
+from lerobot.utils.reye_utils import (
+    create_reye_df_from_dataset,
+    create_reye_df_from_reye,
+)
 from lerobot.utils.train_utils import save_training_state
 from lerobot.utils.wandb_utils import WandBLogger
 from lerobot.utils.wandb_utils_yaak import action_callback
@@ -51,9 +54,7 @@ class MLP(nn.Module, HubMixin):
         pretrained_model_name_or_path = (
             checkpoint_dir / PRETRAINED_MODEL_DIR / SAFETENSORS_SINGLE_FILE
         )
-        load_model_as_safetensor(
-            self, pretrained_model_name_or_path, device="cpu"
-        )
+        load_model_as_safetensor(self, pretrained_model_name_or_path, device="cpu")
 
 
 def __getdataloader__(
@@ -96,16 +97,16 @@ def __getdataloader__(
 
 def batch_mlp_corr(
     judge_policy: nn.Module,
-    dataset: pl.DataFrame,
-    dataset_val: pl.DataFrame,
+    df_train: pl.DataFrame,
+    df_holdout: pl.DataFrame,
     policy_cfg: DictConfig,
     reye_dest: Path,
 ) -> tuple[Path, list[float], list[float]]:
     train_dataloader = __getdataloader__(
-        dataset, policy_cfg.batch_size, judge_policy.net.input.in_features
+        df_train, policy_cfg.batch_size, judge_policy.net.input.in_features
     )
     val_dataloader = __getdataloader__(
-        dataset_val,
+        df_holdout,
         policy_cfg.batch_size,
         judge_policy.net.input.in_features,
         do_shuffle=False,
@@ -159,15 +160,13 @@ def batch_mlp_corr(
         if epoch == policy_cfg.num_epochs - 1:
             log_images = []
             # Log wandb metrics
-            action_callback(dataset_val, log_images, pred_actions)
+            action_callback(df_holdout, log_images, pred_actions)
             Path(f"tmp/{policy_cfg.train_run}").mkdir(parents=True, exist_ok=True)
             log_images[-1].image.save(
                 f"tmp/{policy_cfg.train_run}/action_plot_epoch_{epoch}.png"
             )
             # Log reye metrics
-            df_res = create_reye_df_from_dataset(
-                dataset_val, pred_actions, is_without_clip=False
-            )
+            df_res = create_reye_df_from_reye(df_holdout, pred_actions)
             reye_endpoint = f"mlp-{policy_cfg.train_run}"
             dest = reye_dest / Path(reye_endpoint)
             logging.info(  # noqa: LOG015

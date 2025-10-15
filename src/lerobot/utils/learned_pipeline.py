@@ -15,8 +15,35 @@ import rbyte
 from rbyte.config import BaseModel
 
 
+def _collect_samples(train_drives, dbquery, query, df, input_col, gby, cctr):
+    samples = []
+    valid_drives = []
+    for drive in train_drives:
+        logging.info(f"Processing drive: {drive}")  # noqa: G004, LOG015
+        selected = dbquery(
+            query=query + f" ('{drive}')",
+            samples=(
+                df.filter(pl.col(input_col) == drive)
+                if gby is None
+                else gby(df.filter(pl.col(input_col) == drive))
+            ),
+        )
+        if len(selected) == 0:
+            continue
+        samples.append(selected)
+        valid_drives.append(drive)
+    return cctr(
+        keys=valid_drives,
+        values=samples,
+    )
+
+
 def reye_monkey_patcher(
-    reye_pred_path: Path, gby_config: DataFrameGroupByDynamic, query: str | None = None
+    reye_pred_path: Path,
+    gby_config: DataFrameGroupByDynamic,
+    query: str | None = None,
+    drives_train: list[str] | None = None,
+    drives_test: list[str] | None = None,
 ) -> pl.DataFrame:
     """Generate rbyte dataset from reye format predictions.
     TODO: Should be in yaml as a target "pipeline" with
@@ -50,35 +77,25 @@ def reye_monkey_patcher(
     input_col = "batch/meta/input_id"
     drives = df[input_col].unique().sort().to_list()
 
-    samples = []
-    valid_drives = []
-    for drive in drives:
-        logging.info(f"Processing drive: {drive}")  # noqa: G004, LOG015
-
-        selected = dbquery(
-            query=query,
-            samples=(
-                df.filter(pl.col(input_col) == drive)
-                if gby is None
-                else gby(df.filter(pl.col(input_col) == drive))
-            ),
-        )
-        if len(selected) == 0:
-            continue
-        samples.append(selected)
-        valid_drives.append(drive)
-
     cctr = DataFrameConcater(
         key_column="input_id",
     )
-    samples = cctr(
-        keys=valid_drives,
-        values=samples,
+    train_drives = [drive for drive in drives if drive in drives_train]
+    train_samples = _collect_samples(
+        train_drives, dbquery, query, df, input_col, gby, cctr
     )
     logging.info(  # noqa: LOG015
-        f"built samples height={samples.height}, size={samples.estimated_size(unit := 'gb'):.3f}",  # noqa: G004
+        f"built train samples height={train_samples.height}, size={train_samples.estimated_size(unit := 'gb'):.3f}",  # noqa: G004
     )
-    return samples
+
+    test_drives = [drive for drive in drives if drive in drives_test]
+    test_samples = _collect_samples(
+        test_drives, dbquery, query, df, input_col, gby, cctr
+    )
+    logging.info(  # noqa: LOG015
+        f"built test samples height={test_samples.height}, size={test_samples.estimated_size(unit := 'gb'):.3f}",  # noqa: G004
+    )
+    return train_samples, test_samples
 
 
 class ReyeColumns(BaseModel):

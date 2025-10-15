@@ -194,24 +194,17 @@ def _eval_action_observability(hydra_cfg: DictConfig) -> None:
 def _train_action_observability(hydra_cfg: DictConfig) -> None:
     init_logging()
 
-    # points to holdout_clip
-    dataset_val: Dataset = instantiate(hydra_cfg.datamodule_val.dataset)
-    drive_versatility_measure(dataset_val.samples)
-    dataset_val.samples.write_parquet("holdout_samples.parquet")
-    logging.info(f"Samples in the holdout set: {len(dataset_val.samples)}")  # noqa: G004, LOG015
-
     if "learner" in hydra_cfg.model:
         policy_learned = instantiate(hydra_cfg.model.judge)
         learned_train_loss, learned_val_loss = _train_learned_judge(
-            hydra_cfg, dataset_val, policy_learned
+            hydra_cfg, policy_learned
         )
-        dataset_val: Dataset = instantiate(hydra_cfg.datamodule_val.dataset)
     else:
         learned_train_loss, learned_val_loss = None, None
 
     policy_expert = instantiate(hydra_cfg.model.judge)
     expert_train_loss, expert_val_loss = _train_expert_judge(
-        hydra_cfg, dataset_val, policy_expert
+        hydra_cfg, policy_expert
     )
     _plot_mse_metrics(
         learned_train_loss,
@@ -233,21 +226,20 @@ def _train_action_observability(hydra_cfg: DictConfig) -> None:
 
 
 def _train_expert_judge(
-    hydra_cfg: DictConfig, dataset_val: Dataset, policy: MLP
+    hydra_cfg: DictConfig, policy: MLP
 ) -> tuple[list[float], list[float]]:
-    dataset: pl.DataFrame = instantiate(
-        hydra_cfg.datamodule.dataset.samples_smolvla_expert
-    )
-    # dataset: pl.DataFrame = instantiate(hydra_cfg.datamodule.dataset.samples_rmind)
+    df_train, df_holdout = instantiate(hydra_cfg.datamodule.dataset.samples_smolvla_expert)
+    # df_train, df_holdout = instantiate(hydra_cfg.datamodule.dataset.samples_rmind_expert)
     # instantiate(hydra_cfg.dataset)  # noqa: ERA001
     # dataset = dataset.samples
-    logging.info(f"Samples in the expert train set: {len(dataset)}")  # noqa: G004, LOG015
+    logging.info(f"Samples in the expert train set: {len(df_train)}")  # noqa: G004, LOG015
+    logging.info(f"Samples in the expert holdout set: {len(df_holdout)}")  # noqa: G004, LOG015
     # drive_versatility_measure(dataset.samples)
 
     _, train_losses, val_losses = batch_mlp_corr(
         policy,
-        dataset,
-        dataset_val.samples,
+        df_train,
+        df_holdout,
         hydra_cfg.model.expert,
         hydra_cfg.model.reye_dest,
     )
@@ -255,16 +247,17 @@ def _train_expert_judge(
 
 
 def _train_learned_judge(
-    hydra_cfg: DictConfig, dataset_val: Dataset, policy: MLP
+    hydra_cfg: DictConfig, policy: MLP
 ) -> tuple[list[float], list[float]]:
     # points to bc_clip
-    df_pred: pl.DataFrame = instantiate(hydra_cfg.datamodule.dataset.samples_smolvla)
-    # df_pred: pl.DataFrame = instantiate(hydra_cfg.datamodule.dataset.samples)
-    logging.info(f"Samples in the learner train set: {len(df_pred)}")  # noqa: G004, LOG015
+    df_train, df_holdout = instantiate(hydra_cfg.datamodule.dataset.samples_smolvla_learner)
+    # df_train, df_holdout = instantiate(hydra_cfg.datamodule.dataset.samples_rmind_learner)
+    logging.info(f"Samples in the learner train set: {len(df_train)}")  # noqa: G004, LOG015
+    logging.info(f"Samples in the learner holdout set: {len(df_holdout)}")  # noqa: G004, LOG015
     _, train_losses, val_losses = batch_mlp_corr(
         policy,
-        df_pred,
-        dataset_val.samples,
+        df_train,
+        df_holdout,
         hydra_cfg.model.learner,
         hydra_cfg.model.reye_dest,
     )

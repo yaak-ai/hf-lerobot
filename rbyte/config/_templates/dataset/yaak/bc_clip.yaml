@@ -1,4 +1,13 @@
-samples:
+# AND ("batch/meta/input_id")[7] in ('Niro115-HQ/2023-05-16--10-47-33', 'Niro104-HQ/2022-12-20--13-57-20', 'Niro107-HQ/2023-05-12--12-05-15', 'Niro122-HQ/2023-04-05--12-06-39', 'Niro102-HQ/2022-12-03--11-30-20')
+
+drives: 
+  - 'Niro115-HQ/2023-05-16--10-47-33'
+  - 'Niro104-HQ/2022-12-20--13-57-20'
+  - 'Niro107-HQ/2023-05-12--12-05-15'
+  - 'Niro122-HQ/2023-04-05--12-06-39'
+  - 'Niro102-HQ/2022-12-03--11-30-20'
+
+samples_rmind_learner:
   _target_: lerobot.utils.learned_pipeline.reye_monkey_patcher
   reye_pred_path: "/nasa/team-space/artifacts/predictions/yaak/cargpt/model-ujqd8m57:v5/2025-10-10--15-38-43"
   gby_config:
@@ -15,12 +24,23 @@ samples:
         ("policy/prediction_value/continuous/gas_pedal")[7] AS "meta/VehicleMotion/gas_pedal_normalized",
         ("policy/prediction_value/continuous/brake_pedal")[7] AS "meta/VehicleMotion/brake_pedal_normalized",
         ("policy/prediction_value/continuous/steering_angle")[7] AS "meta/VehicleMotion/steering_angle_normalized",
+        ("batch/data/meta/ImageMetadata.cam_front_left/frame_idx")[7] AS "batch/data/meta/ImageMetadata.cam_front_left/frame_idx",
+        ("batch/data/meta/ImageMetadata.cam_front_left/time_stamp")[7] AS "batch/data/meta/ImageMetadata.cam_front_left/time_stamp",
+        ("batch/meta/input_id")[7] AS "batch/meta/input_id",
     FROM samples
     WHERE len("batch/data/meta/ImageMetadata.cam_front_left/frame_idx") = 7
     AND list_last("batch/data/meta/ImageMetadata.cam_front_left/frame_idx")
     - list_first("batch/data/meta/ImageMetadata.cam_front_left/frame_idx") == 60
+    AND ("batch/meta/input_id")[7] in 
+  drives_train:
+    - 'Niro104-HQ/2022-12-20--13-57-20'
+    - 'Niro107-HQ/2023-05-12--12-05-15'
+    - 'Niro122-HQ/2023-04-05--12-06-39'
+    - 'Niro102-HQ/2022-12-03--11-30-20'
+  drives_test:
+    - 'Niro115-HQ/2023-05-16--10-47-33'
 
-samples_rmind:
+samples_rmind_expert:
   _target_: lerobot.utils.learned_pipeline.reye_monkey_patcher
   reye_pred_path: "/nasa/team-space/artifacts/predictions/yaak/cargpt/model-ujqd8m57:v5/2025-10-10--15-38-43"
   gby_config:
@@ -37,13 +57,23 @@ samples_rmind:
         ("policy/ground_truth/continuous/gas_pedal")[7] AS "meta/VehicleMotion/gas_pedal_normalized",
         ("policy/ground_truth/continuous/brake_pedal")[7] AS "meta/VehicleMotion/brake_pedal_normalized",
         ("policy/ground_truth/continuous/steering_angle")[7] AS "meta/VehicleMotion/steering_angle_normalized",
+        ("batch/data/meta/ImageMetadata.cam_front_left/frame_idx")[7] AS "batch/data/meta/ImageMetadata.cam_front_left/frame_idx",
+        ("batch/data/meta/ImageMetadata.cam_front_left/time_stamp")[7] AS "batch/data/meta/ImageMetadata.cam_front_left/time_stamp",
+        ("batch/meta/input_id")[7] AS "batch/meta/input_id",
     FROM samples
     WHERE len("batch/data/meta/ImageMetadata.cam_front_left/frame_idx") = 7
     AND list_last("batch/data/meta/ImageMetadata.cam_front_left/frame_idx")
     - list_first("batch/data/meta/ImageMetadata.cam_front_left/frame_idx") == 60
+    AND ("batch/meta/input_id")[7] in 
+  drives_train:
+    - 'Niro104-HQ/2022-12-20--13-57-20'
+    - 'Niro107-HQ/2023-05-12--12-05-15'
+    - 'Niro122-HQ/2023-04-05--12-06-39'
+    - 'Niro102-HQ/2022-12-03--11-30-20'
+  drives_test:
+    - 'Niro115-HQ/2023-05-16--10-47-33'
 
-
-samples_smolvla:
+samples_smolvla_learner:
   _target_: lerobot.utils.learned_pipeline.reye_monkey_patcher
   reye_pred_path: "/nasa/team-space/artifacts/predictions/lerobot/policy_smolvla-seed_1000-dataset_yaak-ai_L2D-560000:v3/all_mlp_stride_10"
   gby_config:
@@ -60,11 +90,21 @@ samples_smolvla:
         ("predictions/policy/prediction_value/continuous/gas_pedal")[7] AS "meta/VehicleMotion/gas_pedal_normalized",
         ("predictions/policy/prediction_value/continuous/brake_pedal")[7] AS "meta/VehicleMotion/brake_pedal_normalized",
         ("predictions/policy/prediction_value/continuous/steering_angle")[7] AS "meta/VehicleMotion/steering_angle_normalized",
+        ("batch/data/meta/ImageMetadata.cam_front_left/frame_idx")[7] AS "batch/data/meta/ImageMetadata.cam_front_left/frame_idx",
+        ("batch/data/meta/ImageMetadata.cam_front_left/time_stamp")[7] AS "batch/data/meta/ImageMetadata.cam_front_left/time_stamp",
+        ("batch/meta/input_id")[7] AS "batch/meta/input_id",
     FROM samples
     WHERE len("batch/data/meta/ImageMetadata.cam_front_left/frame_idx") = 7
     AND list_last("batch/data/meta/ImageMetadata.cam_front_left/frame_idx")
     - list_first("batch/data/meta/ImageMetadata.cam_front_left/frame_idx") == 60
-    AND ("batch/meta/input_id")[7] in ('Niro115-HQ/2023-05-16--10-47-33', 'Niro104-HQ/2022-12-20--13-57-20', 'Niro107-HQ/2023-05-12--12-05-15', 'Niro122-HQ/2023-04-05--12-06-39', 'Niro102-HQ/2022-12-03--11-30-20')
+    AND ("batch/meta/input_id")[7] in 
+  drives_train:
+    - 'Niro104-HQ/2022-12-20--13-57-20'
+    - 'Niro107-HQ/2023-05-12--12-05-15'
+    - 'Niro122-HQ/2023-04-05--12-06-39'
+    - 'Niro102-HQ/2022-12-03--11-30-20'
+  drives_test:
+    - 'Niro115-HQ/2023-05-16--10-47-33'
 
 
 samples_smolvla_expert:
@@ -84,11 +124,21 @@ samples_smolvla_expert:
         ("predictions/policy/ground_truth/continuous/gas_pedal")[7] AS "meta/VehicleMotion/gas_pedal_normalized",
         ("predictions/policy/ground_truth/continuous/brake_pedal")[7] AS "meta/VehicleMotion/brake_pedal_normalized",
         ("predictions/policy/ground_truth/continuous/steering_angle")[7] AS "meta/VehicleMotion/steering_angle_normalized",
+        ("batch/data/meta/ImageMetadata.cam_front_left/frame_idx")[7] AS "batch/data/meta/ImageMetadata.cam_front_left/frame_idx",
+        ("batch/data/meta/ImageMetadata.cam_front_left/time_stamp")[7] AS "batch/data/meta/ImageMetadata.cam_front_left/time_stamp",
+        ("batch/meta/input_id")[7] AS "batch/meta/input_id",
     FROM samples
     WHERE len("batch/data/meta/ImageMetadata.cam_front_left/frame_idx") = 7
     AND list_last("batch/data/meta/ImageMetadata.cam_front_left/frame_idx")
     - list_first("batch/data/meta/ImageMetadata.cam_front_left/frame_idx") == 60
-    AND ("batch/meta/input_id")[7] in ('Niro115-HQ/2023-05-16--10-47-33', 'Niro104-HQ/2022-12-20--13-57-20', 'Niro107-HQ/2023-05-12--12-05-15', 'Niro122-HQ/2023-04-05--12-06-39', 'Niro102-HQ/2022-12-03--11-30-20')
+    AND ("batch/meta/input_id")[7] in 
+  drives_train:
+    - 'Niro104-HQ/2022-12-20--13-57-20'
+    - 'Niro107-HQ/2023-05-12--12-05-15'
+    - 'Niro122-HQ/2023-04-05--12-06-39'
+    - 'Niro102-HQ/2022-12-03--11-30-20'
+  drives_test:
+    - 'Niro115-HQ/2023-05-16--10-47-33'
 
 
 samples_no_speed:
