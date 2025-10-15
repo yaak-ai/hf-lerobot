@@ -10,6 +10,7 @@ import torch.nn as nn
 import torch.optim as optim
 from huggingface_hub.constants import SAFETENSORS_SINGLE_FILE
 from omegaconf import DictConfig
+from safetensors.torch import load_model as load_model_as_safetensor
 from safetensors.torch import save_model as save_model_as_safetensor
 from torch.utils.data import DataLoader, TensorDataset
 
@@ -45,20 +46,24 @@ class MLP(nn.Module, HubMixin):
 
     def from_pretrained(
         self,
-        pretrained_model_name_or_path: str | Path,
-        *model_args,
-        **kwargs,
+        checkpoint_dir: str | Path,
     ):
-        model = MLP(*model_args, **kwargs)
-        model.load_state_dict(
-            torch.load(pretrained_model_name_or_path, map_location="cpu")
+        pretrained_model_name_or_path = (
+            checkpoint_dir / PRETRAINED_MODEL_DIR / SAFETENSORS_SINGLE_FILE
         )
-        return model
+        load_model_as_safetensor(
+            self, pretrained_model_name_or_path, device="cpu"
+        )
 
 
 def __getdataloader__(
-    dataset: pl.DataFrame, batch_size=2048, do_shuffle=True
+    dataset: pl.DataFrame, batch_size=2048, input_dim=18, do_shuffle=True
 ) -> DataLoader:
+    src_dim = (dataset["meta/VehicleMotion/gas_pedal_history"].list.len() * 3).unique()[
+        0
+    ] // 3
+    target_dim = input_dim // 3
+    stride = src_dim - target_dim
     x = (
         torch.from_numpy(
             np.stack(
@@ -68,10 +73,10 @@ def __getdataloader__(
                     np.stack(dataset["meta/VehicleMotion/steering_angle_history"]),
                 ),
                 axis=-1,
-            )
+            )[:, stride:, :]
         )
         .to(dtype=torch.float32)
-        .reshape(-1, 18)
+        .reshape(-1, input_dim)
     )  # Reshape to (N*(S-1), 3)
 
     y = torch.from_numpy(
@@ -96,9 +101,14 @@ def batch_mlp_corr(
     policy_cfg: DictConfig,
     reye_dest: Path,
 ) -> tuple[Path, list[float], list[float]]:
-    train_dataloader = __getdataloader__(dataset, policy_cfg.batch_size)
+    train_dataloader = __getdataloader__(
+        dataset, policy_cfg.batch_size, judge_policy.net.input.in_features
+    )
     val_dataloader = __getdataloader__(
-        dataset_val, policy_cfg.batch_size, do_shuffle=False
+        dataset_val,
+        policy_cfg.batch_size,
+        judge_policy.net.input.in_features,
+        do_shuffle=False,
     )
 
     optimizer = optim.Adam(

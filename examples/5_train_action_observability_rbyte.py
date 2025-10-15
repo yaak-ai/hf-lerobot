@@ -11,6 +11,7 @@ import polars as pl
 from hydra.utils import instantiate
 
 from lerobot.utils.action_predictability import MLP, batch_mlp_corr
+from lerobot.utils.random_utils import set_seed
 from lerobot.utils.utils import init_logging
 
 if TYPE_CHECKING:
@@ -25,7 +26,7 @@ def _plot_mse_metrics(
     learned_val_loss: list,
     expert_train_loss: list,
     expert_val_loss: list,
-    expert_train_run_name: str
+    expert_train_run_name: str,
 ) -> None:
     _, ax = plt.subplots(2, 1, figsize=(12, 6))
     if learned_train_loss:
@@ -74,7 +75,9 @@ def _plot_mse_metrics(
     ax[1].set_ylabel("MSE Loss")
     ax[1].legend()
     ax[1].grid(True)  # noqa: FBT003
-    plt.savefig(f"tmp/{expert_train_run_name}/action_predictability_loss_comparison.png")
+    plt.savefig(
+        f"tmp/{expert_train_run_name}/action_predictability_loss_comparison.png"
+    )
 
 
 def drive_versatility_measure(samples: pl.DataFrame) -> None:
@@ -123,6 +126,71 @@ def drive_versatility_measure(samples: pl.DataFrame) -> None:
         )
 
 
+def _eval_action_observability(hydra_cfg: DictConfig) -> None:
+    init_logging()
+    set_seed(hydra_cfg.seed)
+
+    # points to holdout_clip
+    # dataset_val: Dataset = instantiate(hydra_cfg.datamodule_val.dataset)
+    policy_learned = instantiate(hydra_cfg.model.judge)
+    learner_checkpoint = Path(
+        "outputs/train/2025-10-14/16-00-00_mlp_learner_rmind_t_10/checkpoints"
+    )
+    expert_checkpoint = Path(
+        "outputs/train/2025-10-14/16-00-51_mlp_expert_rmind_t_10/checkpoints"
+    )
+    policy_learned.from_pretrained(learner_checkpoint)
+    policy_expert = instantiate(hydra_cfg.model.judge)
+    policy_expert.from_pretrained(expert_checkpoint)
+    import torch
+
+    #  constant braking
+    data_past = torch.zeros(1, 5, 3, dtype=torch.float32)
+    data_past[:, :, 1] = torch.tensor(0.3, dtype=torch.float32)
+    data_past = data_past.reshape(-1, 15)
+
+    results_learned = policy_learned(data_past)
+    results_expert = policy_expert(data_past)
+    logging.info(f"Learned results: {results_learned}")  # noqa: G004, LOG015
+    logging.info(f"Expert results: {results_expert}")  # noqa: G004, LOG015
+
+    # increasing gas pedal
+    data_past = torch.zeros(1, 5, 3, dtype=torch.float32)
+    data_past[:, :, 0] = torch.tensor([0.1, 0.2, 0.3, 0.4, 0.5], dtype=torch.float32)
+    data_past = data_past.reshape(-1, 15)
+    results_learned = policy_learned(data_past)
+    results_expert = policy_expert(data_past)
+    logging.info(f"Learned results: {results_learned}")  # noqa: G004, LOG015
+    logging.info(f"Expert results: {results_expert}")  # noqa: G004, LOG015
+
+    # increasing brake pedal
+    data_past = torch.zeros(1, 5, 3, dtype=torch.float32)
+    data_past[:, :, 1] = torch.tensor([0.1, 0.2, 0.3, 0.4, 0.5], dtype=torch.float32)
+    data_past = data_past.reshape(-1, 15)
+    results_learned = policy_learned(data_past)
+    results_expert = policy_expert(data_past)
+    logging.info(f"Learned results: {results_learned}")  # noqa: G004, LOG015
+    logging.info(f"Expert results: {results_expert}")  # noqa: G004, LOG015
+
+    # decreasing brake pedal
+    data_past = torch.zeros(1, 5, 3, dtype=torch.float32)
+    data_past[:, :, 1] = torch.arange(0.5, 0, -0.1, dtype=torch.float32)
+    data_past = data_past.reshape(-1, 15)
+    results_learned = policy_learned(data_past)
+    results_expert = policy_expert(data_past)
+    logging.info(f"Learned results: {results_learned}")  # noqa: G004, LOG015
+    logging.info(f"Expert results: {results_expert}")  # noqa: G004, LOG015
+
+    # decreasing gas pedal
+    data_past = torch.zeros(1, 5, 3, dtype=torch.float32)
+    data_past[:, :, 0] = torch.arange(0.5, 0, -0.1, dtype=torch.float32)
+    data_past = data_past.reshape(-1, 15)
+    results_learned = policy_learned(data_past)
+    results_expert = policy_expert(data_past)
+    logging.info(f"Learned results: {results_learned}")  # noqa: G004, LOG015
+    logging.info(f"Expert results: {results_expert}")  # noqa: G004, LOG015
+
+
 def _train_action_observability(hydra_cfg: DictConfig) -> None:
     init_logging()
 
@@ -150,7 +218,7 @@ def _train_action_observability(hydra_cfg: DictConfig) -> None:
         learned_val_loss,
         expert_train_loss,
         expert_val_loss,
-        hydra_cfg.model.expert.train_run
+        hydra_cfg.model.expert.train_run,
     )
     logging.info(f"Expert judge MSE : {expert_val_loss[-1]:e}")  # noqa: G004, LOG015
 
@@ -167,13 +235,18 @@ def _train_action_observability(hydra_cfg: DictConfig) -> None:
 def _train_expert_judge(
     hydra_cfg: DictConfig, dataset_val: Dataset, policy: MLP
 ) -> tuple[list[float], list[float]]:
-    dataset: Dataset = instantiate(hydra_cfg.dataset)
-    logging.info(f"Samples in the expert train set: {len(dataset.samples)}")  # noqa: G004, LOG015
+    dataset: pl.DataFrame = instantiate(
+        hydra_cfg.datamodule.dataset.samples_smolvla_expert
+    )
+    # dataset: pl.DataFrame = instantiate(hydra_cfg.datamodule.dataset.samples_rmind)
+    # instantiate(hydra_cfg.dataset)  # noqa: ERA001
+    # dataset = dataset.samples
+    logging.info(f"Samples in the expert train set: {len(dataset)}")  # noqa: G004, LOG015
     # drive_versatility_measure(dataset.samples)
 
     _, train_losses, val_losses = batch_mlp_corr(
         policy,
-        dataset.samples,
+        dataset,
         dataset_val.samples,
         hydra_cfg.model.expert,
         hydra_cfg.model.reye_dest,
@@ -185,7 +258,8 @@ def _train_learned_judge(
     hydra_cfg: DictConfig, dataset_val: Dataset, policy: MLP
 ) -> tuple[list[float], list[float]]:
     # points to bc_clip
-    df_pred: pl.DataFrame = instantiate(hydra_cfg.datamodule.dataset.samples)
+    df_pred: pl.DataFrame = instantiate(hydra_cfg.datamodule.dataset.samples_smolvla)
+    # df_pred: pl.DataFrame = instantiate(hydra_cfg.datamodule.dataset.samples)
     logging.info(f"Samples in the learner train set: {len(df_pred)}")  # noqa: G004, LOG015
     _, train_losses, val_losses = batch_mlp_corr(
         policy,
@@ -199,6 +273,7 @@ def _train_learned_judge(
 
 @hydra.main(version_base=None)
 def main(cfg: DictConfig) -> None:
+    # _eval_action_observability(cfg)
     return _train_action_observability(cfg)
 
 
