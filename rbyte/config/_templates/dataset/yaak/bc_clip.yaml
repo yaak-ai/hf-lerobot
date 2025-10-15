@@ -1,12 +1,3 @@
-# AND ("batch/meta/input_id")[7] in ('Niro115-HQ/2023-05-16--10-47-33', 'Niro104-HQ/2022-12-20--13-57-20', 'Niro107-HQ/2023-05-12--12-05-15', 'Niro122-HQ/2023-04-05--12-06-39', 'Niro102-HQ/2022-12-03--11-30-20')
-
-drives: 
-  - 'Niro115-HQ/2023-05-16--10-47-33'
-  - 'Niro104-HQ/2022-12-20--13-57-20'
-  - 'Niro107-HQ/2023-05-12--12-05-15'
-  - 'Niro122-HQ/2023-04-05--12-06-39'
-  - 'Niro102-HQ/2022-12-03--11-30-20'
-
 samples_rmind_learner:
   _target_: lerobot.utils.learned_pipeline.reye_monkey_patcher
   reye_pred_path: "/nasa/team-space/artifacts/predictions/yaak/cargpt/model-ujqd8m57:v5/2025-10-10--15-38-43"
@@ -33,12 +24,12 @@ samples_rmind_learner:
     - list_first("batch/data/meta/ImageMetadata.cam_front_left/frame_idx") == 60
     AND ("batch/meta/input_id")[7] in 
   drives_train:
-    - 'Niro104-HQ/2022-12-20--13-57-20'
-    - 'Niro107-HQ/2023-05-12--12-05-15'
-    - 'Niro122-HQ/2023-04-05--12-06-39'
-    - 'Niro102-HQ/2022-12-03--11-30-20'
-  drives_test:
     - 'Niro115-HQ/2023-05-16--10-47-33'
+    - 'Niro104-HQ/2022-12-20--13-57-20'  
+    - 'Niro102-HQ/2022-12-03--11-30-20'
+    - 'Niro122-HQ/2023-04-05--12-06-39'
+  drives_test:
+    - 'Niro107-HQ/2023-05-12--12-05-15'
 
 samples_rmind_expert:
   _target_: lerobot.utils.learned_pipeline.reye_monkey_patcher
@@ -66,12 +57,12 @@ samples_rmind_expert:
     - list_first("batch/data/meta/ImageMetadata.cam_front_left/frame_idx") == 60
     AND ("batch/meta/input_id")[7] in 
   drives_train:
-    - 'Niro104-HQ/2022-12-20--13-57-20'
-    - 'Niro107-HQ/2023-05-12--12-05-15'
-    - 'Niro122-HQ/2023-04-05--12-06-39'
-    - 'Niro102-HQ/2022-12-03--11-30-20'
-  drives_test:
     - 'Niro115-HQ/2023-05-16--10-47-33'
+    - 'Niro104-HQ/2022-12-20--13-57-20'  
+    - 'Niro102-HQ/2022-12-03--11-30-20'
+    - 'Niro122-HQ/2023-04-05--12-06-39'
+  drives_test:
+    - 'Niro107-HQ/2023-05-12--12-05-15'
 
 samples_smolvla_learner:
   _target_: lerobot.utils.learned_pipeline.reye_monkey_patcher
@@ -99,12 +90,12 @@ samples_smolvla_learner:
     - list_first("batch/data/meta/ImageMetadata.cam_front_left/frame_idx") == 60
     AND ("batch/meta/input_id")[7] in 
   drives_train:
-    - 'Niro104-HQ/2022-12-20--13-57-20'
-    - 'Niro107-HQ/2023-05-12--12-05-15'
-    - 'Niro122-HQ/2023-04-05--12-06-39'
-    - 'Niro102-HQ/2022-12-03--11-30-20'
-  drives_test:
     - 'Niro115-HQ/2023-05-16--10-47-33'
+    - 'Niro104-HQ/2022-12-20--13-57-20'  
+    - 'Niro102-HQ/2022-12-03--11-30-20'
+    - 'Niro122-HQ/2023-04-05--12-06-39'
+  drives_test:
+    - 'Niro107-HQ/2023-05-12--12-05-15'
 
 
 samples_smolvla_expert:
@@ -133,12 +124,12 @@ samples_smolvla_expert:
     - list_first("batch/data/meta/ImageMetadata.cam_front_left/frame_idx") == 60
     AND ("batch/meta/input_id")[7] in 
   drives_train:
-    - 'Niro104-HQ/2022-12-20--13-57-20'
-    - 'Niro107-HQ/2023-05-12--12-05-15'
-    - 'Niro122-HQ/2023-04-05--12-06-39'
-    - 'Niro102-HQ/2022-12-03--11-30-20'
-  drives_test:
     - 'Niro115-HQ/2023-05-16--10-47-33'
+    - 'Niro104-HQ/2022-12-20--13-57-20'  
+    - 'Niro102-HQ/2022-12-03--11-30-20'
+    - 'Niro122-HQ/2023-04-05--12-06-39'
+  drives_test:
+    - 'Niro107-HQ/2023-05-12--12-05-15'
 
 
 samples_no_speed:

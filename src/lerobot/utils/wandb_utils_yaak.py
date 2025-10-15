@@ -226,9 +226,15 @@ def action_callback(
     """At the end of eval step: collect the loss metrics and plot the losses."""
 
     # Extract GT from DataFrame
-    action_names, gt_actions = _gt_factory(samples)
+    # action_names, gt_actions = _gt_factory(samples)
+    action_names = [
+        "meta/VehicleMotion/gas_pedal_normalized",
+        "meta/VehicleMotion/brake_pedal_normalized",
+        "meta/VehicleMotion/steering_angle_normalized",
+    ]
+    gt_actions = np.stack([np.stack(samples[name]) for name in action_names]).T
 
-    drives = samples["__input_id"]
+    drives = samples["input_id"]
     unique_drives = drives.unique().to_list()
     for drive in unique_drives:
         drive_selector = drives == drive

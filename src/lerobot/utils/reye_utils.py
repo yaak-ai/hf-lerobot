@@ -27,17 +27,26 @@ def _create_reye_columns(actions, is_without_clip: bool) -> list[pl.Expr]:
             .list.last()
             .alias("batch/data/meta/ImageMetadata.cam_front_left/frame_idx"),
         ])
+    return _create_reye_actions(cols, actions)
 
+
+def _create_reye_actions(cols, actions, is_list=True) -> list[pl.Expr]:
     cols.extend([
-        pl.col("meta/VehicleMotion/brake_pedal_normalized")
-        .list.first()
-        .alias("predictions/policy/ground_truth/continuous/brake_pedal"),
-        pl.col("meta/VehicleMotion/gas_pedal_normalized")
-        .list.first()
-        .alias("predictions/policy/ground_truth/continuous/gas_pedal"),
-        pl.col("meta/VehicleMotion/steering_angle_normalized")
-        .list.first()
-        .alias("predictions/policy/ground_truth/continuous/steering_angle"),
+        (
+            pl.col("meta/VehicleMotion/brake_pedal_normalized").list.first()
+            if is_list
+            else pl.col("meta/VehicleMotion/brake_pedal_normalized")
+        ).alias("predictions/policy/ground_truth/continuous/brake_pedal"),
+        (
+            pl.col("meta/VehicleMotion/gas_pedal_normalized").list.first()
+            if is_list
+            else pl.col("meta/VehicleMotion/gas_pedal_normalized")
+        ).alias("predictions/policy/ground_truth/continuous/gas_pedal"),
+        (
+            pl.col("meta/VehicleMotion/steering_angle_normalized").list.first()
+            if is_list
+            else pl.col("meta/VehicleMotion/steering_angle_normalized")
+        ).alias("predictions/policy/ground_truth/continuous/steering_angle"),
         pl.lit(0).alias("predictions/policy/ground_truth/discrete/turn_signal"),
         pl.Series(
             values=actions[:, 0],
@@ -121,4 +130,14 @@ def create_reye_df_from_dataset(
     eval_dataset: pl.DataFrame, actions, is_without_clip: bool
 ) -> pl.DataFrame:
     cols = _create_reye_columns(actions, is_without_clip)
+    return _create_reye_df(eval_dataset, cols)
+
+
+def create_reye_df_from_reye(eval_dataset: pl.DataFrame, actions) -> pl.DataFrame:
+    cols = [
+        pl.col("batch/meta/input_id").cast(pl.String),
+        pl.col("batch/data/meta/ImageMetadata.cam_front_left/frame_idx"),
+        pl.col("batch/data/meta/ImageMetadata.cam_front_left/time_stamp"),
+    ]
+    cols = _create_reye_actions(cols, actions, is_list=False)
     return _create_reye_df(eval_dataset, cols)
