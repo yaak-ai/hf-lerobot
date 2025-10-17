@@ -1,0 +1,11 @@
+# @package _global_
+
+---
+defaults:
+  - /paths: yaak/default
+  - /model: smolvla
+  - _self_
+
+
+f: ${hydra:run.dir}/${model.artifact}.onnx
+artifacts_dir: ${hydra:run.dir}

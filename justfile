@@ -39,3 +39,9 @@ convert *ARGS: generate-config
     uv run src/lerobot/policies/smolvla/conversion_utils_yaak.py \
         --config-path {{ justfile_directory() }}/rbyte/config \
         --config-name train.yaml {{ ARGS }}
+
+export-onnx *ARGS:
+    uv run src/lerobot/scripts/export_onnx.py \
+        --config-path {{ justfile_directory() }}/rbyte/config \
+        --config-name export/onnx.yaml \
+        {{ ARGS }}
