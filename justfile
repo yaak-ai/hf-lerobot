@@ -10,7 +10,7 @@ _default:
     @just --list --unsorted
 
 sync:
-    uv sync --extra dev --extra test --extra smolvla
+    uv sync --extra dev --extra test --extra smolvla --extra export
 
 generate-config:
     ytt --file {{ justfile_directory() }}/rbyte/config/_templates/ \
