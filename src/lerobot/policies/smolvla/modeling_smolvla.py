@@ -187,7 +187,7 @@ def create_sinusoidal_pos_embedding(
     if time.ndim != 1:
         raise ValueError("The time tensor is expected to be of shape `(batch_size, )`.")
 
-    dtype = get_safe_dtype(torch.float64, device.type)
+    dtype = get_safe_dtype(torch.float16, device.type)
     fraction = torch.linspace(0.0, 1.0, dimension // 2, dtype=dtype, device=device)
     period = min_period * (max_period / min_period) ** fraction
 
@@ -468,14 +468,14 @@ class SmolVLAPolicy(PreTrainedPolicy):
         lang_tokens, lang_masks = self.prepare_language(batch)
         actions = self.prepare_action(batch)
         actions_is_pad = batch.get(f"{ACTION}_id_pad")
-        loss_dict = {}
+        # loss_dict = {}
         losses = self.model.forward(images, img_masks, lang_tokens, lang_masks, state, actions, noise, time)
-        loss_dict["losses_after_forward"] = losses.clone()
+        # loss_dict["losses_after_forward"] = losses.clone()
 
         if actions_is_pad is not None:
             in_episode_bound = ~actions_is_pad
             losses = losses * in_episode_bound.unsqueeze(-1)
-            loss_dict["losses_after_in_ep_bound"] = losses.clone()
+        #     loss_dict["losses_after_in_ep_bound"] = losses.clone()
 
         # Remove padding
         orig_action_dim = self.config.action_feature.shape[0]
@@ -483,10 +483,10 @@ class SmolVLAPolicy(PreTrainedPolicy):
             losses = losses[:, :, : orig_action_dim]
         else:
             losses = losses[:, :, : self.config.max_action_dim]
-        loss_dict["losses_after_rm_padding"] = losses.clone()
+        # loss_dict["losses_after_rm_padding"] = losses.clone()
 
         # Has to be run before the losses.mean() call
-        tracking_callback(loss_dict, losses[..., :orig_action_dim], actions[:, :, : orig_action_dim], mode="train" if self.training else "eval")  # noqa: E501
+        # tracking_callback(loss_dict, losses[..., :orig_action_dim], actions[:, :, : orig_action_dim], mode="train" if self.training else "eval")  # noqa: E501
 
         # For backward pass
         loss = losses.mean()
@@ -587,24 +587,130 @@ class SmolVLAPolicy(PreTrainedPolicy):
     def prepare_language(self, batch) -> tuple[Tensor, Tensor]:
         """Tokenize the text input"""
         device = batch[OBS_STATE].device
-        tasks = batch["task"]
-        if isinstance(tasks, str):
-            tasks = [tasks]
 
-        if len(tasks) == 1:
-            tasks = [tasks[0] for _ in range(batch[OBS_STATE].shape[0])]
+        lang_tokens = torch.Tensor([
+            [
+                15423,
+                260,
+                970,
+                6911,
+                284,
+                1574,
+                5756,
+                3547,
+                28,
+                1066,
+                260,
+                970,
+                6911,
+                979,
+                22768,
+                288,
+                5442,
+                3372,
+                284,
+                5930,
+                30,
+                198,
+                2,
+                2,
+                2,
+                2,
+                2,
+                2,
+                2,
+                2,
+                2,
+                2,
+                2,
+                2,
+                2,
+                2,
+                2,
+                2,
+                2,
+                2,
+                2,
+                2,
+                2,
+                2,
+                2,
+                2,
+                2,
+                2,
+            ]
+        ]).to(device, dtype=torch.int64)
+        lang_masks = torch.Tensor([
+            [
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                False,
+                False,
+                False,
+                False,
+                False,
+                False,
+                False,
+                False,
+                False,
+                False,
+                False,
+                False,
+                False,
+                False,
+                False,
+                False,
+                False,
+                False,
+                False,
+                False,
+                False,
+                False,
+                False,
+                False,
+                False,
+                False,
+            ]
+        ]).to(device, dtype=torch.bool)
 
-        tasks = [task if task.endswith("\n") else f"{task}\n" for task in tasks]
+        # tasks = batch["task"]
+        # if isinstance(tasks, str):
+        #     tasks = [tasks]
 
-        tokenized_prompt = self.language_tokenizer.__call__(
-            tasks,
-            padding=self.config.pad_language_to,
-            padding_side="right",
-            max_length=self.config.tokenizer_max_length,
-            return_tensors="pt",
-        )
-        lang_tokens = tokenized_prompt["input_ids"].to(device=device)
-        lang_masks = tokenized_prompt["attention_mask"].to(device=device, dtype=torch.bool)
+        # if len(tasks) == 1:
+        #     tasks = [tasks[0] for _ in range(batch[OBS_STATE].shape[0])]
+
+        # tasks = [task if task.endswith("\n") else f"{task}\n" for task in tasks]
+
+        # tokenized_prompt = self.language_tokenizer.__call__(
+        #     tasks,
+        #     padding=self.config.pad_language_to,
+        #     padding_side="right",
+        #     max_length=self.config.tokenizer_max_length,
+        #     return_tensors="pt",
+        # )
+        # lang_tokens = tokenized_prompt["input_ids"].to(device=device)
+        # lang_masks = tokenized_prompt["attention_mask"].to(device=device, dtype=torch.bool)
 
         return lang_tokens, lang_masks
 
@@ -781,14 +887,14 @@ class VLAFlowMatching(nn.Module):
             mean=0.0,
             std=1.0,
             size=shape,
-            dtype=torch.float32,
+            dtype=torch.float16,
             device=device,
         )
         return noise
 
     def sample_time(self, bsize, device):
         beta_dist = torch.distributions.Beta(concentration1=1.5, concentration0=1.0)
-        time_beta = beta_dist.sample((bsize,)).to(device=device, dtype=torch.float32)
+        time_beta = beta_dist.sample((bsize,)).to(device=device, dtype=torch.float16)
         time = time_beta * 0.999 + 0.001
         return time
 
@@ -821,7 +927,6 @@ class VLAFlowMatching(nn.Module):
                 pad_masks.append(image_start_mask)
 
             img_emb = self.vlm_with_expert.embed_image(img)
-            img_emb = img_emb
 
             # Normalize image embeddings
             img_emb_dim = img_emb.shape[-1]
@@ -966,16 +1071,9 @@ class VLAFlowMatching(nn.Module):
         )
         suffix_out = suffix_out[:, -self.config.chunk_size :]
         # Original openpi code, upcast attention output
-        suffix_out = suffix_out.to(dtype=torch.float32)
+        suffix_out = suffix_out.to(dtype=torch.float16)
         v_t = self.action_out_proj(suffix_out)
         losses = F.mse_loss(u_t, v_t, reduction="none")
-
-        if self.use_acc_loss:
-            vel_diff = v_t[:, 1:, :] - v_t[:, :-1, :]
-            acc_loss = vel_diff.pow(2).mean(axis=(0, 1))
-            # # 3) combine
-            lambda_acc = 0.01
-            losses += lambda_acc * acc_loss
 
         return losses
 
@@ -1003,10 +1101,10 @@ class VLAFlowMatching(nn.Module):
             fill_kv_cache=True,
         )
         dt = -1.0 / self.config.num_steps
-        dt = torch.tensor(dt, dtype=torch.float32, device=device)
+        dt = torch.tensor(dt, dtype=torch.float16, device=device)
 
         x_t = noise
-        time = torch.tensor(1.0, dtype=torch.float32, device=device)
+        time = torch.tensor(1.0, dtype=torch.float16, device=device)
         while time >= -dt / 2:
             expanded_time = time.expand(bsize)
             v_t = self.denoise_step(
@@ -1051,6 +1149,6 @@ class VLAFlowMatching(nn.Module):
         )
         suffix_out = outputs_embeds[1]
         suffix_out = suffix_out[:, -self.config.chunk_size :]
-        suffix_out = suffix_out.to(dtype=torch.float32)
+        suffix_out = suffix_out.to(dtype=torch.float16)
         v_t = self.action_out_proj(suffix_out)
         return v_t

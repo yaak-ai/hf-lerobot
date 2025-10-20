@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 
 import hydra
 import torch
@@ -10,7 +11,7 @@ from lerobot.policies.utils import get_device_from_parameters
 from lerobot.utils.utils import init_logging
 
 
-def batch_dict(device: torch.device) -> dict:
+def batch_dict(device: torch.device, dtype: torch.dtype) -> dict:
     return {
         "meta/ImageMetadata.cam_front_left/time_stamp": torch.tensor(
             [
@@ -28,21 +29,21 @@ def batch_dict(device: torch.device) -> dict:
             "Given the waypoints and current vehicle speed, follow the waypoints while adhering to traffic rules and regulations."
         ],
         "action.continuous": make_tensor(
-            (1, 50, 3), dtype=torch.float32, device=device, low=0.0, high=1.0
+            (1, 50, 3), dtype=dtype, device=device, low=0.0, high=1.0
         ),
         "observation.images.front_left": make_tensor(
             (1, 6, 3, 324, 576),
-            dtype=torch.float32,
+            dtype=dtype,
             device=device,
             low=0,
             high=1,
         ),
         "observation.state.vehicle": make_tensor(
-            (1, 6, 1), dtype=torch.float32, device=device, low=0.0, high=130.0
+            (1, 6, 1), dtype=dtype, device=device, low=0.0, high=130.0
         ),
         "observation.state.waypoints": make_tensor(
             (1, 6, 20),
-            dtype=torch.float32,
+            dtype=dtype,
             device=device,
             low=-148.0924835205078,
             high=146.4394073486328,
@@ -53,7 +54,6 @@ def batch_dict(device: torch.device) -> dict:
 @hydra.main(version_base=None)
 @torch.inference_mode()
 def main(cfg: DictConfig) -> None:
-    export_onnx_only(cfg)
     export_dynamo(cfg)
 
 
@@ -93,22 +93,49 @@ def export_onnx_only(cfg: DictConfig) -> None:
 def export_dynamo(cfg: DictConfig) -> None:
     logging.debug("instantiating policy")  # noqa: LOG015
     policy, _ = instantiate(cfg.model)
+    policy = policy.to(torch.float16).to("cpu")
     device = get_device_from_parameters(policy)
-    args = [batch_dict(device)]
+    dtype = torch.float16
+    # 2nd arg
+    noise = torch.normal(
+        mean=0.0,
+        std=1.0,
+        size=(1, 50, 32),
+        dtype=dtype,
+        device=device,
+    )
+    # 3rd arg
+    time = torch.tensor([0.5], device=device, dtype=dtype)
+    args = [batch_dict(device, dtype), noise, time]
     policy.eval()
 
-    logging.debug("torch exporting")  # noqa: LOG015
+    # result = policy(args[0], noise, time)  # noqa: ERA001
+
+    logging.info("torch exporting")  # noqa: LOG015
     exported_program = torch.export.export(mod=policy, args=tuple(args), strict=True)
-    logging.debug("onnx exporting")  # noqa: LOG015
+
+    dest = Path(cfg["f"])
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    torch.export.save(exported_program, dest.parent / "dynamo_exported.pt2")
+    # exported_program = torch.export.load(dest.parent / "dynamo_exported.pt2")  # noqa: E501, ERA001
+    # result = exported_program.module()(batch_dict(device, dtype), noise, time)  # noqa: ERA001
+    logging.info("torch export done")  # noqa: LOG015
+
+    logging.info("onnx exporting")  # noqa: LOG015
     model = torch.onnx.export(
         model=exported_program,
+        args=tuple(args),
+        f=cfg["f"],
+        artifacts_dir=cfg["artifacts_dir"],
+        opset_version=19,
         external_data=False,
         dynamo=True,
         optimize=True,
         verify=True,
+        report=True,
     )
 
-    logging.debug("exported")  # noqa: LOG015
+    logging.info(f"exported to {cfg['artifacts_dir']}")  # noqa: G004, LOG015
 
 
 if __name__ == "__main__":
