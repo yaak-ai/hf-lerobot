@@ -175,6 +175,7 @@ def train(cfg: TrainPipelineConfig):
     policy = make_policy(
         cfg=cfg.policy,
         ds_meta=dataset.meta,
+        rename_map=cfg.rename_map,
     )
 
     # Create processors - only provide dataset_stats if not resuming from saved processors
@@ -192,6 +193,9 @@ def train(cfg: TrainPipelineConfig):
                 "features": {**policy.config.input_features, **policy.config.output_features},
                 "norm_map": policy.config.normalization_mapping,
             },
+        }
+        processor_kwargs["preprocessor_overrides"]["rename_observations_processor"] = {
+            "rename_map": cfg.rename_map
         }
         postprocessor_kwargs["postprocessor_overrides"] = {
             "unnormalizer_processor": {

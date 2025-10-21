@@ -481,6 +481,7 @@ def eval_main(cfg: EvalPipelineConfig):
     policy = make_policy(
         cfg=cfg.policy,
         env_cfg=cfg.env,
+        rename_map=cfg.rename_map,
     )
 
     policy.eval()
