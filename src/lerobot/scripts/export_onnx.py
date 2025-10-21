@@ -2,6 +2,7 @@ import logging
 from pathlib import Path
 
 import hydra
+import pytest
 import torch
 from hydra.utils import instantiate
 from omegaconf import DictConfig
@@ -11,8 +12,8 @@ from lerobot.policies.utils import get_device_from_parameters
 from lerobot.utils.utils import init_logging
 
 
-def batch_dict(device: torch.device, dtype: torch.dtype) -> dict:
-    return {
+def dummy_input(device: torch.device, dtype: torch.dtype) -> dict:
+    batch = {
         "meta/ImageMetadata.cam_front_left/time_stamp": torch.tensor(
             [
                 1670067032648344,
@@ -49,12 +50,24 @@ def batch_dict(device: torch.device, dtype: torch.dtype) -> dict:
             high=146.4394073486328,
         ),
     }
+    # 2nd arg
+    noise = torch.normal(
+        mean=0.0,
+        std=1.0,
+        size=(1, 50, 32),
+        dtype=dtype,
+        device=device,
+    )
+    # 3rd arg: always torch.float32
+    time = torch.tensor([0.5], device=device, dtype=torch.float32)
+    return batch, noise, time
 
 
 @hydra.main(version_base=None)
 @torch.inference_mode()
 def main(cfg: DictConfig) -> None:
-    export_dynamo(cfg)
+    # export_dynamo(cfg)  # noqa: ERA001
+    test_fp16_tradeoff(cfg)
 
 
 def export_onnx_only(cfg: DictConfig) -> None:
@@ -64,17 +77,7 @@ def export_onnx_only(cfg: DictConfig) -> None:
     policy.eval()
 
     logging.debug("torch exporting")  # noqa: LOG015
-    batch = batch_dict(device)
-    # 2nd arg
-    noise = torch.normal(
-        mean=0.0,
-        std=1.0,
-        size=(1, 50, 32),
-        dtype=torch.float32,
-        device=device,
-    )
-    # 3rd arg
-    time = torch.tensor([0.5], device=device, dtype=torch.float32)
+    batch, noise, time = dummy_input(device)
     torch.onnx.export(
         policy,
         (batch, noise, time),
@@ -90,26 +93,49 @@ def export_onnx_only(cfg: DictConfig) -> None:
     )
 
 
-def export_dynamo(cfg: DictConfig) -> None:
+def prepare_model_data(cfg: DictConfig, dtype: torch.dtype) -> None:
     logging.debug("instantiating policy")  # noqa: LOG015
     policy, _ = instantiate(cfg.model)
-    policy = policy.to(torch.float16).to("cpu")
-    device = get_device_from_parameters(policy)
-    dtype = torch.float16
-    # 2nd arg
-    noise = torch.normal(
-        mean=0.0,
-        std=1.0,
-        size=(1, 50, 32),
-        dtype=dtype,
-        device=device,
-    )
-    # 3rd arg
-    time = torch.tensor([0.5], device=device, dtype=dtype)
-    args = [batch_dict(device, dtype), noise, time]
+
+    policy = policy.to(dtype).to(cfg.device)
     policy.eval()
 
-    # result = policy(args[0], noise, time)  # noqa: ERA001
+    device = get_device_from_parameters(policy)
+    args = dummy_input(device, dtype)
+    return policy, args
+
+
+def test_fp16_tradeoff(cfg: DictConfig) -> None:
+    policy, _ = prepare_model_data(cfg, torch.float32)
+
+    policy_export, _ = prepare_model_data(cfg, torch.float16)
+    n_rollouts = 10
+    device = get_device_from_parameters(policy)
+    comparison = torch.zeros((n_rollouts, 50, 3), dtype=torch.float32, device=cfg.device)
+    average_comparison = torch.zeros((n_rollouts,), dtype=torch.float32, device=cfg.device)
+    for i in range(n_rollouts):
+        args = dummy_input(device, torch.float32)
+        result = policy(*args)
+        # simulate exporting
+        with torch.inference_mode(), pytest.MonkeyPatch.context() as m:
+            m.setattr("torch.compiler._is_exporting_flag", True)
+            args_export = dummy_input(device, torch.float16)
+            result_export = policy_export(*args_export)
+
+            average_comparison[i] = torch.abs(result_export[0] - result[0])
+            comparison[i, ...] = torch.abs(result_export[1] - result[1])[..., :3]
+    logging.info(f"Per element mean {comparison.mean():.4f}")  # noqa: G004, LOG015
+    logging.info(f"95th quantile {comparison.quantile(0.95):.4f}")  # noqa: G004, LOG015
+    logging.info(f"mean of means {average_comparison.mean():.4f}")  # noqa: G004, LOG015
+
+
+def export_dynamo(cfg: DictConfig) -> None:
+    logging.debug("instantiating policy")  # noqa: LOG015
+    policy, args = prepare_model_data(cfg, torch.float16)
+
+    with torch.inference_mode(), pytest.MonkeyPatch.context() as m:
+        m.setattr("torch.compiler._is_exporting_flag", True)
+        result = policy(args)
 
     logging.info("torch exporting")  # noqa: LOG015
     exported_program = torch.export.export(mod=policy, args=tuple(args), strict=True)

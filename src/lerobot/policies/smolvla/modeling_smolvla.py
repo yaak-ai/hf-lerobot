@@ -187,7 +187,7 @@ def create_sinusoidal_pos_embedding(
     if time.ndim != 1:
         raise ValueError("The time tensor is expected to be of shape `(batch_size, )`.")
 
-    dtype = get_safe_dtype(torch.float16, device.type)
+    dtype = get_safe_dtype(torch.float64, device.type) if not torch.compiler.is_exporting() else get_safe_dtype(torch.float32, device.type)  # noqa: E501
     fraction = torch.linspace(0.0, 1.0, dimension // 2, dtype=dtype, device=device)
     period = min_period * (max_period / min_period) ** fraction
 
@@ -492,7 +492,7 @@ class SmolVLAPolicy(PreTrainedPolicy):
         loss = losses.mean()
         # For backward pass
         # loss_dict["loss"] = loss.item()
-        return loss
+        return loss, losses
 
 
     def prepare_images_context(self, batch):
@@ -887,14 +887,14 @@ class VLAFlowMatching(nn.Module):
             mean=0.0,
             std=1.0,
             size=shape,
-            dtype=torch.float16,
+            dtype=torch.float32 if not torch.compiler.is_exporting() else self.action_in_proj.weight.dtype,
             device=device,
         )
         return noise
 
     def sample_time(self, bsize, device):
         beta_dist = torch.distributions.Beta(concentration1=1.5, concentration0=1.0)
-        time_beta = beta_dist.sample((bsize,)).to(device=device, dtype=torch.float16)
+        time_beta = beta_dist.sample((bsize,)).to(device=device, dtype=torch.float32)
         time = time_beta * 0.999 + 0.001
         return time
 
@@ -1048,7 +1048,7 @@ class VLAFlowMatching(nn.Module):
         if time is None:
             time = self.sample_time(actions.shape[0], actions.device)
 
-        time_expanded = time[:, None, None]
+        time_expanded = time[:, None, None].to(actions.dtype)
         x_t = time_expanded * noise + (1 - time_expanded) * actions
         u_t = noise - actions
         prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(
@@ -1071,7 +1071,8 @@ class VLAFlowMatching(nn.Module):
         )
         suffix_out = suffix_out[:, -self.config.chunk_size :]
         # Original openpi code, upcast attention output
-        suffix_out = suffix_out.to(dtype=torch.float16)
+        if not torch.compiler.is_exporting():
+            suffix_out = suffix_out.to(dtype=torch.float32)
         v_t = self.action_out_proj(suffix_out)
         losses = F.mse_loss(u_t, v_t, reduction="none")
 
