@@ -47,7 +47,7 @@ def get_step_identifier(step: int, total_steps: int) -> str:
 def get_step_checkpoint_dir(output_dir: Path, total_steps: int, step: int) -> Path:
     """Returns the checkpoint sub-directory corresponding to the step number."""
     step_identifier = get_step_identifier(step, total_steps)
-    return output_dir / CHECKPOINTS_DIR / step_identifier
+    return Path(f"{output_dir}/{CHECKPOINTS_DIR}/step={step_identifier}")
 
 
 def save_training_step(step: int, save_dir: Path) -> None:
