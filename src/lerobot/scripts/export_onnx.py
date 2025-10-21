@@ -127,7 +127,6 @@ def export_dynamo(cfg: DictConfig) -> None:
         args=tuple(args),
         f=cfg["f"],
         artifacts_dir=cfg["artifacts_dir"],
-        opset_version=19,
         external_data=False,
         dynamo=True,
         optimize=True,
