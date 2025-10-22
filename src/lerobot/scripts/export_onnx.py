@@ -1,3 +1,4 @@
+from copy import deepcopy
 import logging
 from pathlib import Path
 
@@ -66,7 +67,7 @@ def dummy_input(device: torch.device, dtype: torch.dtype) -> dict:
 @hydra.main(version_base=None)
 @torch.inference_mode()
 def main(cfg: DictConfig) -> None:
-    export_dynamo(cfg)  # noqa: ERA001
+    export_dynamo(cfg)
     test_fp16_tradeoff(cfg)
 
 
@@ -111,22 +112,66 @@ def test_fp16_tradeoff(cfg: DictConfig) -> None:
     policy_export, _ = prepare_model_data(cfg, torch.float16)
     n_rollouts = 10
     device = get_device_from_parameters(policy)
-    comparison = torch.zeros((n_rollouts, 50, 3), dtype=torch.float32, device=cfg.device)
-    average_comparison = torch.zeros((n_rollouts,), dtype=torch.float32, device=cfg.device)
+    metric = torch.nn.CosineSimilarity(dim=-1)
+    l1_over_horizon = torch.zeros(
+        (n_rollouts, 50, 3), dtype=torch.float32, device=cfg.device
+    )
+    cosine_flat = torch.zeros(
+        (n_rollouts,), dtype=torch.float32, device=cfg.device
+    )
+    cosine_over_horizon = torch.zeros(
+        (n_rollouts, 50), dtype=torch.float32, device=cfg.device
+    )
+    l1_mean = torch.zeros((n_rollouts,), dtype=torch.float32, device=cfg.device)
     for i in range(n_rollouts):
         args = dummy_input(device, torch.float32)
+        args_export = [
+            {
+                k: deepcopy(v).to(torch.float16)
+                if isinstance(v, torch.Tensor)
+                else deepcopy(v)
+                for k, v in args[0].items()
+            }
+        ]
+        args_export.extend([args[1].to(torch.float16), args[-1]])
         result = policy(*args)
         # simulate exporting
         with torch.inference_mode(), pytest.MonkeyPatch.context() as m:
             m.setattr("torch.compiler._is_exporting_flag", True)
-            args_export = dummy_input(device, torch.float16)
             result_export = policy_export(*args_export)
 
-            average_comparison[i] = torch.abs(result_export[0] - result[0])
-            comparison[i, ...] = torch.abs(result_export[1] - result[1])[..., :3]
-    logging.info(f"Per element mean {comparison.mean():.4f}")  # noqa: G004, LOG015
-    logging.info(f"95th quantile {comparison.quantile(0.95):.4f}")  # noqa: G004, LOG015
-    logging.info(f"mean of means {average_comparison.mean():.4f}")  # noqa: G004, LOG015
+            l1_mean[i] = torch.abs(result_export[0] - result[0])
+            l1_over_horizon[i, ...] = torch.abs(result_export[1] - result[1])[..., :3]
+            # cosine similarity: compare each of 50 action vectors separately
+            horizon_tensorrt = result_export[1].to(torch.float32)[..., :3]
+            horizon_torch = result[1][..., :3]
+            cosine_over_horizon[i, ...] = metric(horizon_tensorrt, horizon_torch)
+            # cosine similarity: just flat out 50x3 vectors into a single vector
+            # (Gr00t style) & compute the angle
+            cosine_flat[i] = metric(
+                horizon_tensorrt.flatten(), horizon_torch.flatten()
+            )
+
+    logging.info(f"Per element l1 mean {l1_over_horizon.mean():.4f}")  # noqa: G004, LOG015
+    logging.info(f"l1 95th quantile {l1_over_horizon.quantile(0.95):.4f}")  # noqa: G004, LOG015
+    logging.info(f"l1 mean of means {l1_mean.mean():.4f}")  # noqa: G004, LOG015
+
+    stat = cosine_over_horizon.mean()
+    logging.info(  # noqa: LOG015
+        f"Cosine similarity per horizon mean {torch.rad2deg(torch.acos(stat)):.4f} deg ({stat:.4f})"  # noqa: G004
+    )
+    stat = cosine_over_horizon.quantile(0.95)
+    logging.info(  # noqa: LOG015
+        f"Cosine similarity per horizon 95th quantile {torch.rad2deg(torch.acos(stat)):.4f} deg ({stat:.4f})"  # noqa: E501, G004
+    )
+    stat = cosine_flat.mean()
+    logging.info(  # noqa: LOG015
+        f"Cosine similarity flat mean {torch.rad2deg(torch.acos(stat)):.4f} deg ({stat:.4f})"  # noqa: E501, G004
+    )
+    stat = cosine_flat.quantile(0.95)
+    logging.info(  # noqa: LOG015
+        f"Cosine similarity flat 95th quantile {torch.rad2deg(torch.acos(stat)):.4f} deg ({stat:.4f})"  # noqa: E501, G004
+    )
 
 
 def export_dynamo(cfg: DictConfig) -> None:
