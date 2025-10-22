@@ -10,3 +10,6 @@ defaults:
 device: cpu
 f: ${hydra:run.dir}/${model.artifact}.onnx
 artifacts_dir: ${hydra:run.dir}
+
+test:
+  path: "outputs/2025-10-22/15-46-13/yaak/lerobot/policy_smolvla-seed_1000-dataset_yaak-ai_L2D-560000:v3.onnx"

@@ -1,8 +1,9 @@
-from copy import deepcopy
 import logging
+from copy import deepcopy
 from pathlib import Path
 
 import hydra
+import onnxruntime as ort
 import pytest
 import torch
 from hydra.utils import instantiate
@@ -69,6 +70,7 @@ def dummy_input(device: torch.device, dtype: torch.dtype) -> dict:
 def main(cfg: DictConfig) -> None:
     export_dynamo(cfg)
     test_fp16_tradeoff(cfg)
+    test_onnx_export(cfg)
 
 
 def export_onnx_only(cfg: DictConfig) -> None:
@@ -106,7 +108,7 @@ def prepare_model_data(cfg: DictConfig, dtype: torch.dtype) -> None:
     return policy, args
 
 
-def test_fp16_tradeoff(cfg: DictConfig) -> None:
+def test_fp16_tradeoff(cfg: DictConfig) -> None:  # noqa: PLR0914
     policy, _ = prepare_model_data(cfg, torch.float32)
 
     policy_export, _ = prepare_model_data(cfg, torch.float16)
@@ -116,9 +118,7 @@ def test_fp16_tradeoff(cfg: DictConfig) -> None:
     l1_over_horizon = torch.zeros(
         (n_rollouts, 50, 3), dtype=torch.float32, device=cfg.device
     )
-    cosine_flat = torch.zeros(
-        (n_rollouts,), dtype=torch.float32, device=cfg.device
-    )
+    cosine_flat = torch.zeros((n_rollouts,), dtype=torch.float32, device=cfg.device)
     cosine_over_horizon = torch.zeros(
         (n_rollouts, 50), dtype=torch.float32, device=cfg.device
     )
@@ -148,9 +148,7 @@ def test_fp16_tradeoff(cfg: DictConfig) -> None:
             cosine_over_horizon[i, ...] = metric(horizon_tensorrt, horizon_torch)
             # cosine similarity: just flat out 50x3 vectors into a single vector
             # (Gr00t style) & compute the angle
-            cosine_flat[i] = metric(
-                horizon_tensorrt.flatten(), horizon_torch.flatten()
-            )
+            cosine_flat[i] = metric(horizon_tensorrt.flatten(), horizon_torch.flatten())
 
     logging.info(f"Per element l1 mean {l1_over_horizon.mean():.4f}")  # noqa: G004, LOG015
     logging.info(f"l1 95th quantile {l1_over_horizon.quantile(0.95):.4f}")  # noqa: G004, LOG015
@@ -206,6 +204,42 @@ def export_dynamo(cfg: DictConfig) -> None:
     )
 
     logging.info(f"exported to {cfg['artifacts_dir']}")  # noqa: G004, LOG015
+
+
+def test_onnx_export(cfg: DictConfig) -> None:
+    session = ort.InferenceSession(cfg.test.path)
+
+    args = dummy_input(torch.device(cfg.device), torch.float16)
+
+    inputs = session.get_inputs()
+    names = [input_arg.name for input_arg in inputs]
+    # Assign inputs by name if possible
+    input_feed_dict = {
+        "batch_" + k.lower().replace("/", "_").replace(".", "_"): v.numpy()
+        for k, v in args[0].items()
+        if "batch_" + k.lower().replace("/", "_").replace(".", "_") in names
+    }
+    not_assigned = {
+        k: v
+        for k, v in args[0].items()
+        if "batch_" + k.lower().replace("/", "_").replace(".", "_") not in names
+    }
+    input_feed_dict["noise"] = args[1].numpy()
+    input_feed_dict["time"] = args[2].numpy()
+
+    # Assign remaining inputs by shape
+    for input_val in inputs:
+        if input_val.name in input_feed_dict:
+            continue
+        for k, v in not_assigned.items():
+            if isinstance(v, torch.Tensor) and torch.Size(input_val.shape) == v.shape:
+                input_feed_dict[input_val.name] = v.numpy()
+                not_assigned.pop(k)
+                break
+
+    # Run inference
+    outputs = session.run(None, input_feed_dict)
+    logging.info(f"Outputs: {outputs}")  # noqa: G004, LOG015
 
 
 if __name__ == "__main__":
