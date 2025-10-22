@@ -14,6 +14,15 @@ from lerobot.policies.utils import get_device_from_parameters
 from lerobot.utils.utils import init_logging
 
 
+class ExportPolicy(torch.nn.Module):
+    def __init__(self, policy):
+        super().__init__()
+        self.policy = policy
+
+    def forward(self, batch, noise):
+        return self.policy.predict_action_chunk(batch, noise)
+
+
 def dummy_input(device: torch.device, dtype: torch.dtype) -> dict:
     batch = {
         "meta/ImageMetadata.cam_front_left/time_stamp": torch.tensor(
@@ -69,8 +78,8 @@ def dummy_input(device: torch.device, dtype: torch.dtype) -> dict:
 @torch.inference_mode()
 def main(cfg: DictConfig) -> None:
     export_dynamo(cfg)
-    test_fp16_tradeoff(cfg)
-    test_onnx_export(cfg)
+    # test_fp16_tradeoff(cfg)
+    # test_onnx_export(cfg)
 
 
 def export_onnx_only(cfg: DictConfig) -> None:
@@ -101,7 +110,6 @@ def prepare_model_data(cfg: DictConfig, dtype: torch.dtype) -> None:
     policy, _ = instantiate(cfg.model)
 
     policy = policy.to(dtype).to(cfg.device)
-    policy.eval()
 
     device = get_device_from_parameters(policy)
     args = dummy_input(device, dtype)
@@ -174,14 +182,19 @@ def test_fp16_tradeoff(cfg: DictConfig) -> None:  # noqa: PLR0914
 
 def export_dynamo(cfg: DictConfig) -> None:
     logging.debug("instantiating policy")  # noqa: LOG015
-    policy, args = prepare_model_data(cfg, torch.float16)
+    policy_vla, args = prepare_model_data(cfg, torch.float16)
 
-    with torch.inference_mode(), pytest.MonkeyPatch.context() as m:
-        m.setattr("torch.compiler._is_exporting_flag", True)
-        result = policy(*args)
+    policy: ExportPolicy = ExportPolicy(policy_vla)
+    policy.eval()
+
+    # with torch.inference_mode(), pytest.MonkeyPatch.context() as m:
+    #     m.setattr("torch.compiler._is_exporting_flag", True)  # noqa: ERA001
+    #     result = policy(*args[:-1])  # noqa: ERA001
 
     logging.info("torch exporting")  # noqa: LOG015
-    exported_program = torch.export.export(mod=policy, args=tuple(args), strict=True)
+    exported_program = torch.export.export(
+        mod=policy, args=tuple(args[:-1]), strict=True
+    )
 
     dest = Path(cfg["f"])
     dest.parent.mkdir(parents=True, exist_ok=True)

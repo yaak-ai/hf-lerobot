@@ -425,7 +425,8 @@ class SmolVLAPolicy(PreTrainedPolicy):
 
     @torch.no_grad()
     def predict_action_chunk(self, batch: dict[str, Tensor], noise: Tensor | None = None) -> Tensor:
-        self.eval()
+        if not torch.compiler.is_exporting():
+            self.eval()
 
         batch = self._prepare_batch(batch)
         self._queues = populate_queues(self._queues, batch, exclude_keys=[ACTION])
@@ -492,7 +493,7 @@ class SmolVLAPolicy(PreTrainedPolicy):
         loss = losses.mean()
         # For backward pass
         # loss_dict["loss"] = loss.item()
-        return loss, losses
+        return loss
 
 
     def prepare_images_context(self, batch):
@@ -1102,10 +1103,11 @@ class VLAFlowMatching(nn.Module):
             fill_kv_cache=True,
         )
         dt = -1.0 / self.config.num_steps
-        dt = torch.tensor(dt, dtype=torch.float16, device=device)
+        dtype = torch.float32 if not torch.compiler.is_exporting() else self.action_in_proj.weight.dtype
+        dt = torch.tensor(dt, dtype=dtype, device=device)
 
         x_t = noise
-        time = torch.tensor(1.0, dtype=torch.float16, device=device)
+        time = torch.tensor(1.0, dtype=dtype, device=device)
         while time >= -dt / 2:
             expanded_time = time.expand(bsize)
             v_t = self.denoise_step(
@@ -1150,6 +1152,7 @@ class VLAFlowMatching(nn.Module):
         )
         suffix_out = outputs_embeds[1]
         suffix_out = suffix_out[:, -self.config.chunk_size :]
-        suffix_out = suffix_out.to(dtype=torch.float16)
+        if not torch.compiler.is_exporting():
+            suffix_out = suffix_out.to(dtype=torch.float32)
         v_t = self.action_out_proj(suffix_out)
         return v_t
