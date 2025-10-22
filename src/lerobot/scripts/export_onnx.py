@@ -66,7 +66,7 @@ def dummy_input(device: torch.device, dtype: torch.dtype) -> dict:
 @hydra.main(version_base=None)
 @torch.inference_mode()
 def main(cfg: DictConfig) -> None:
-    # export_dynamo(cfg)  # noqa: ERA001
+    export_dynamo(cfg)  # noqa: ERA001
     test_fp16_tradeoff(cfg)
 
 
@@ -135,7 +135,7 @@ def export_dynamo(cfg: DictConfig) -> None:
 
     with torch.inference_mode(), pytest.MonkeyPatch.context() as m:
         m.setattr("torch.compiler._is_exporting_flag", True)
-        result = policy(args)
+        result = policy(*args)
 
     logging.info("torch exporting")  # noqa: LOG015
     exported_program = torch.export.export(mod=policy, args=tuple(args), strict=True)
