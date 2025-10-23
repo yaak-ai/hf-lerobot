@@ -27,6 +27,12 @@
     title: π₀ (Pi0)
   - local: pi05
     title: π₀.₅ (Pi05)
+  - local: groot
+    title: Nvidia Gr00t N1.5
+  title: "Policies"
+- sections:
+  - local: il_sim
+    title: Imitation Learning in Sim
   - local: libero
     title: Using Libero
   title: "Policies"
