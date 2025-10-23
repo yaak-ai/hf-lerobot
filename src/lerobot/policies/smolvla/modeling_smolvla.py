@@ -394,9 +394,10 @@ class SmolVLAPolicy(PreTrainedPolicy):
         # In the case of offline inference, we have the action in the batch
         # that why without the k != ACTION check, it will raise an error because we are trying to stack
         # on an empty container.
-        for k in batch:
-            if k in self._queues:
-                batch[k] = torch.stack(list(self._queues[k]), dim=1) if len(self._queues[k]) > 0 else batch[k]
+        if not torch.compiler.is_exporting():
+            for k in batch:
+                if k in self._queues:
+                    batch[k] = torch.stack(list(self._queues[k]), dim=1) if len(self._queues[k]) > 0 else batch[k]
 
         images, img_masks = self.prepare_images(batch) if not self.use_context else self.prepare_images_context(batch)
         state = self.prepare_state(batch) if not self.use_context else self.prepare_state_context(batch)
@@ -429,7 +430,8 @@ class SmolVLAPolicy(PreTrainedPolicy):
             self.eval()
 
         batch = self._prepare_batch(batch)
-        self._queues = populate_queues(self._queues, batch, exclude_keys=[ACTION])
+        if not torch.compiler.is_exporting():
+            self._queues = populate_queues(self._queues, batch, exclude_keys=[ACTION])
 
         actions = self._get_action_chunk(batch, noise)
         return actions
@@ -469,14 +471,14 @@ class SmolVLAPolicy(PreTrainedPolicy):
         lang_tokens, lang_masks = self.prepare_language(batch)
         actions = self.prepare_action(batch)
         actions_is_pad = batch.get(f"{ACTION}_id_pad")
-        # loss_dict = {}
+        loss_dict = {}
         losses = self.model.forward(images, img_masks, lang_tokens, lang_masks, state, actions, noise, time)
-        # loss_dict["losses_after_forward"] = losses.clone()
+        loss_dict["losses_after_forward"] = losses.clone()
 
         if actions_is_pad is not None:
             in_episode_bound = ~actions_is_pad
             losses = losses * in_episode_bound.unsqueeze(-1)
-        #     loss_dict["losses_after_in_ep_bound"] = losses.clone()
+            loss_dict["losses_after_in_ep_bound"] = losses.clone()
 
         # Remove padding
         orig_action_dim = self.config.action_feature.shape[0]
@@ -484,15 +486,19 @@ class SmolVLAPolicy(PreTrainedPolicy):
             losses = losses[:, :, : orig_action_dim]
         else:
             losses = losses[:, :, : self.config.max_action_dim]
-        # loss_dict["losses_after_rm_padding"] = losses.clone()
+        loss_dict["losses_after_rm_padding"] = losses.clone()
 
         # Has to be run before the losses.mean() call
-        # tracking_callback(loss_dict, losses[..., :orig_action_dim], actions[:, :, : orig_action_dim], mode="train" if self.training else "eval")  # noqa: E501
+        if not torch.compiler.is_exporting():
+            tracking_callback(loss_dict, losses[..., :orig_action_dim], actions[:, :, : orig_action_dim], mode="train" if self.training else "eval")  # noqa: E501
 
         # For backward pass
         loss = losses.mean()
-        # For backward pass
-        # loss_dict["loss"] = loss.item()
+        if not torch.compiler.is_exporting():
+            # For backward pass
+            loss_dict["loss"] = loss.item()
+            return loss, loss_dict
+        # For export, we return the loss tensor directly
         return loss
 
 
@@ -1107,8 +1113,7 @@ class VLAFlowMatching(nn.Module):
         dt = torch.tensor(dt, dtype=dtype, device=device)
 
         x_t = noise
-        time = torch.tensor(1.0, dtype=dtype, device=device)
-        while time >= -dt / 2:
+        for time in torch.arange(1.0, 0, -1 / 10, dtype=dtype, device=device):
             expanded_time = time.expand(bsize)
             v_t = self.denoise_step(
                 prefix_pad_masks,
@@ -1118,7 +1123,6 @@ class VLAFlowMatching(nn.Module):
             )
             # Euler step
             x_t += dt * v_t
-            time += dt
         return x_t
 
     def denoise_step(

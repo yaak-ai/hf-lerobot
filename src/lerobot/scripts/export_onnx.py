@@ -237,8 +237,10 @@ def test_onnx_export(cfg: DictConfig) -> None:
         for k, v in args[0].items()
         if "batch_" + k.lower().replace("/", "_").replace(".", "_") not in names
     }
-    input_feed_dict["noise"] = args[1].numpy()
-    input_feed_dict["time"] = args[2].numpy()
+    if "noise" in names:
+        input_feed_dict["noise"] = args[1].numpy()
+    if "time" in names:
+        input_feed_dict["time"] = args[2].numpy()
 
     # Assign remaining inputs by shape
     for input_val in inputs:
