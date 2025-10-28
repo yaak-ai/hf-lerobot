@@ -1,6 +1,7 @@
 import logging
 from copy import deepcopy
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import hydra
 import onnxruntime as ort
@@ -10,8 +11,13 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig
 from torch.testing import make_tensor
 
+from lerobot.policies.smolvla.conversion_utils_yaak import __getbatch__
 from lerobot.policies.utils import get_device_from_parameters
 from lerobot.utils.utils import init_logging
+
+if TYPE_CHECKING:
+    from omegaconf import DictConfig
+    from torch.utils.data import DataLoader
 
 
 class ExportPolicy(torch.nn.Module):
@@ -27,18 +33,20 @@ def dummy_input(device: torch.device, dtype: torch.dtype) -> dict:
     batch = {
         "meta/ImageMetadata.cam_front_left/time_stamp": torch.tensor(
             [
-                1670067032648344,
-                1670067032981700,
-                1670067033314001,
-                1670067033646234,
-                1670067033978448,
-                1670067034310751,
+                [
+                    1670067032648344,
+                    1670067032981700,
+                    1670067033314001,
+                    1670067033646234,
+                    1670067033978448,
+                    1670067034310751,
+                ]
             ],
             dtype=torch.int64,
             device=device,
         ),
         "task": [
-            "Given the waypoints and current vehicle speed, follow the waypoints while adhering to traffic rules and regulations."
+            "Given the waypoints and current vehicle speed, follow the waypoints while adhering to traffic rules and regulations"
         ],
         "action.continuous": make_tensor(
             (1, 50, 3), dtype=dtype, device=device, low=0.0, high=1.0
@@ -71,6 +79,18 @@ def dummy_input(device: torch.device, dtype: torch.dtype) -> dict:
     )
     # 3rd arg: always torch.float32
     time = torch.tensor([0.5], device=device, dtype=torch.float32)
+    return batch, noise, time
+
+
+def episode_input(cfg: DictConfig, device: torch.device, dtype: torch.dtype) -> dict:
+    dataloader_test: DataLoader = instantiate(cfg.datamodule)
+    batch = __getbatch__(next(iter(dataloader_test)))
+    for k, v in batch.items():
+        if isinstance(v, torch.Tensor):
+            if v.dtype != dtype:
+                batch[k] = v.to(dtype)
+            batch[k] = batch[k].to(device)
+    _, noise, time = dummy_input(torch.device(cfg.device), dtype)
     return batch, noise, time
 
 
@@ -118,8 +138,8 @@ def prepare_model_data(cfg: DictConfig, dtype: torch.dtype) -> None:
 
 def test_fp16_tradeoff(cfg: DictConfig) -> None:  # noqa: PLR0914
     policy, _ = prepare_model_data(cfg, torch.float32)
-
-    policy_export, _ = prepare_model_data(cfg, torch.float16)
+    dtype = torch.float16 if cfg.dtype == "torch.float16" else torch.float32
+    policy_export, _ = prepare_model_data(cfg, dtype)
     n_rollouts = 10
     device = get_device_from_parameters(policy)
     metric = torch.nn.CosineSimilarity(dim=-1)
@@ -135,13 +155,13 @@ def test_fp16_tradeoff(cfg: DictConfig) -> None:  # noqa: PLR0914
         args = dummy_input(device, torch.float32)
         args_export = [
             {
-                k: deepcopy(v).to(torch.float16)
+                k: deepcopy(v).to(dtype)
                 if isinstance(v, torch.Tensor)
                 else deepcopy(v)
                 for k, v in args[0].items()
             }
         ]
-        args_export.extend([args[1].to(torch.float16), args[-1]])
+        args_export.extend([args[1].to(dtype), args[-1]])
         result = policy(*args)
         # simulate exporting
         with torch.inference_mode(), pytest.MonkeyPatch.context() as m:
@@ -182,7 +202,9 @@ def test_fp16_tradeoff(cfg: DictConfig) -> None:  # noqa: PLR0914
 
 def export_dynamo(cfg: DictConfig) -> None:
     logging.debug("instantiating policy")  # noqa: LOG015
-    policy_vla, args = prepare_model_data(cfg, torch.float16)
+    dtype = torch.float16 if cfg.dtype == "torch.float16" else torch.float32
+    policy_vla, _ = prepare_model_data(cfg, dtype)
+    args = episode_input(cfg, torch.device(cfg.device), dtype)
 
     policy: ExportPolicy = ExportPolicy(policy_vla)
     policy.eval()
@@ -200,7 +222,7 @@ def export_dynamo(cfg: DictConfig) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     torch.export.save(exported_program, dest.parent / "dynamo_exported.pt2")
     # exported_program = torch.export.load(dest.parent / "dynamo_exported.pt2")  # noqa: E501, ERA001
-    # result = exported_program.module()(batch_dict(device, dtype), noise, time)  # noqa: ERA001
+    # result = exported_program.module()(*args)  # noqa: ERA001
     logging.info("torch export done")  # noqa: LOG015
 
     logging.info("onnx exporting")  # noqa: LOG015
@@ -214,6 +236,7 @@ def export_dynamo(cfg: DictConfig) -> None:
         optimize=True,
         verify=True,
         report=True,
+        dump_exported_program=True,
     )
 
     logging.info(f"exported to {cfg['artifacts_dir']}")  # noqa: G004, LOG015
@@ -221,8 +244,8 @@ def export_dynamo(cfg: DictConfig) -> None:
 
 def test_onnx_export(cfg: DictConfig) -> None:
     session = ort.InferenceSession(cfg.test.path)
-
-    args = dummy_input(torch.device(cfg.device), torch.float16)
+    dtype = torch.float16 if cfg.dtype == "torch.float16" else torch.float32
+    args = dummy_input(torch.device(cfg.device), dtype)
 
     inputs = session.get_inputs()
     names = [input_arg.name for input_arg in inputs]

@@ -4,10 +4,13 @@
 defaults:
   - /paths: yaak/default
   - /model: smolvla
+  - /datamodule: yaak/predict
   - _self_
 
 
 device: cpu
+dtype: torch.float16
+# dtype: torch.float32
 f: ${hydra:run.dir}/${model.artifact}.onnx
 artifacts_dir: ${hydra:run.dir}
 
