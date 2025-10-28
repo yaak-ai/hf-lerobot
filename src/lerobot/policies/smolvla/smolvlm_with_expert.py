@@ -44,10 +44,11 @@ def apply_rope(x, positions, max_wavelength=10_000):
     cos = torch.cos(radians)  # .to(dtype=dtype)
 
     x1, x2 = x.split(d_half, dim=-1)
+    if torch.compiler.is_exporting():
+        return torch.cat([x1 * cos - x2 * sin, x2 * cos + x1 * sin], dim=-1).to(dtype)
     res = torch.empty_like(x)
     res[..., :d_half] = x1 * cos - x2 * sin
     res[..., d_half:] = x2 * cos + x1 * sin
-
     return res.to(dtype)
 
 

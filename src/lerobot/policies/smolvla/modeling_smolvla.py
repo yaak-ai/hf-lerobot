@@ -262,6 +262,13 @@ def pad_vector(vector, new_dim):
     shape = list(vector.shape)
     current_dim = shape[-1]
     shape[-1] = new_dim
+
+    if torch.compiler.is_exporting():
+        padding = torch.zeros(
+            *shape[:-1], new_dim - current_dim, dtype=vector.dtype, device=vector.device
+        )
+        return torch.cat([vector, padding], dim=-1)
+
     new_vector = torch.zeros(*shape, dtype=vector.dtype, device=vector.device)
     new_vector[..., :current_dim] = vector
     return new_vector
