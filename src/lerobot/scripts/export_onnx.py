@@ -91,6 +91,8 @@ def episode_input(cfg: DictConfig, device: torch.device, dtype: torch.dtype) -> 
                 batch[k] = v.to(dtype)
             batch[k] = batch[k].to(device)
     _, noise, time = dummy_input(torch.device(cfg.device), dtype)
+    batch.pop("meta/ImageMetadata.cam_front_left/time_stamp", None)
+    batch.pop("action.continuous", None)
     return batch, noise, time
 
 
@@ -207,6 +209,7 @@ def export_dynamo(cfg: DictConfig) -> None:
     args = episode_input(cfg, torch.device(cfg.device), dtype)
 
     policy: ExportPolicy = ExportPolicy(policy_vla)
+    # policy = torch.compile(policy)  # noqa: ERA001
     policy.eval()
 
     # with torch.inference_mode(), pytest.MonkeyPatch.context() as m:
