@@ -12,6 +12,7 @@ from omegaconf import DictConfig
 from torch.testing import make_tensor
 
 from lerobot.policies.smolvla.conversion_utils_yaak import __getbatch__
+from lerobot.policies.smolvla.modeling_smolvla import resize_with_pad
 from lerobot.policies.utils import get_device_from_parameters
 from lerobot.utils.utils import init_logging
 
@@ -90,6 +91,8 @@ def episode_input(cfg: DictConfig, device: torch.device, dtype: torch.dtype) -> 
             if v.dtype != dtype:
                 batch[k] = v.to(dtype)
             batch[k] = batch[k].to(device)
+    im_key = "observation.images.front_left"
+    batch[im_key] = resize_with_pad(batch[im_key][0], 512, 512, pad_value=0)[None, ...]
     _, noise, time = dummy_input(torch.device(cfg.device), dtype)
     batch.pop("meta/ImageMetadata.cam_front_left/time_stamp", None)
     batch.pop("action.continuous", None)
@@ -157,9 +160,7 @@ def test_fp16_tradeoff(cfg: DictConfig) -> None:  # noqa: PLR0914
         args = dummy_input(device, torch.float32)
         args_export = [
             {
-                k: deepcopy(v).to(dtype)
-                if isinstance(v, torch.Tensor)
-                else deepcopy(v)
+                k: deepcopy(v).to(dtype) if isinstance(v, torch.Tensor) else deepcopy(v)
                 for k, v in args[0].items()
             }
         ]
@@ -206,10 +207,15 @@ def export_dynamo(cfg: DictConfig) -> None:
     logging.debug("instantiating policy")  # noqa: LOG015
     dtype = torch.float16 if cfg.dtype == "torch.float16" else torch.float32
     policy_vla, _ = prepare_model_data(cfg, dtype)
+
+    # temporary hack
+    policy_vla.config.num_steps = 1
+    policy_vla.config.resize_imgs_with_padding = None
+
     args = episode_input(cfg, torch.device(cfg.device), dtype)
 
     policy: ExportPolicy = ExportPolicy(policy_vla)
-    policy = torch.compile(policy)  # noqa: ERA001
+    policy = torch.compile(policy)
     policy.eval()
 
     # with torch.inference_mode(), pytest.MonkeyPatch.context() as m:
