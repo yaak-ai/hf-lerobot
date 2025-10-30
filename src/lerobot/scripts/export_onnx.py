@@ -209,7 +209,7 @@ def export_dynamo(cfg: DictConfig) -> None:
     args = episode_input(cfg, torch.device(cfg.device), dtype)
 
     policy: ExportPolicy = ExportPolicy(policy_vla)
-    # policy = torch.compile(policy)  # noqa: ERA001
+    policy = torch.compile(policy)  # noqa: ERA001
     policy.eval()
 
     # with torch.inference_mode(), pytest.MonkeyPatch.context() as m:

@@ -602,110 +602,118 @@ class SmolVLAPolicy(PreTrainedPolicy):
         """Tokenize the text input"""
         device = batch[OBS_STATE].device
 
-        lang_tokens = torch.Tensor([
-            [
-                15423,
-                260,
-                970,
-                6911,
-                284,
-                1574,
-                5756,
-                3547,
-                28,
-                1066,
-                260,
-                970,
-                6911,
-                979,
-                22768,
-                288,
-                5442,
-                3372,
-                284,
-                5930,
-                30,
-                198,
-                2,
-                2,
-                2,
-                2,
-                2,
-                2,
-                2,
-                2,
-                2,
-                2,
-                2,
-                2,
-                2,
-                2,
-                2,
-                2,
-                2,
-                2,
-                2,
-                2,
-                2,
-                2,
-                2,
-                2,
-                2,
-                2,
-            ]
-        ]).to(device, dtype=torch.int64)
-        lang_masks = torch.Tensor([
-            [
-                True,
-                True,
-                True,
-                True,
-                True,
-                True,
-                True,
-                True,
-                True,
-                True,
-                True,
-                True,
-                True,
-                True,
-                True,
-                True,
-                True,
-                True,
-                True,
-                True,
-                True,
-                True,
-                False,
-                False,
-                False,
-                False,
-                False,
-                False,
-                False,
-                False,
-                False,
-                False,
-                False,
-                False,
-                False,
-                False,
-                False,
-                False,
-                False,
-                False,
-                False,
-                False,
-                False,
-                False,
-                False,
-                False,
-                False,
-                False,
-            ]
-        ]).to(device, dtype=torch.bool)
+        lang_tokens = (
+            torch.Tensor([
+                [
+                    15423,
+                    260,
+                    970,
+                    6911,
+                    284,
+                    1574,
+                    5756,
+                    3547,
+                    28,
+                    1066,
+                    260,
+                    970,
+                    6911,
+                    979,
+                    22768,
+                    288,
+                    5442,
+                    3372,
+                    284,
+                    5930,
+                    198,
+                    2,
+                    2,
+                    2,
+                    2,
+                    2,
+                    2,
+                    2,
+                    2,
+                    2,
+                    2,
+                    2,
+                    2,
+                    2,
+                    2,
+                    2,
+                    2,
+                    2,
+                    2,
+                    2,
+                    2,
+                    2,
+                    2,
+                    2,
+                    2,
+                    2,
+                    2,
+                    2,
+                ]
+            ])
+            .to(device, dtype=torch.int64)
+            .repeat(batch[OBS_STATE].shape[0], 1)
+        )
+        lang_masks = (
+            torch.Tensor([
+                [
+                    True,
+                    True,
+                    True,
+                    True,
+                    True,
+                    True,
+                    True,
+                    True,
+                    True,
+                    True,
+                    True,
+                    True,
+                    True,
+                    True,
+                    True,
+                    True,
+                    True,
+                    True,
+                    True,
+                    True,
+                    True,
+                    False,
+                    False,
+                    False,
+                    False,
+                    False,
+                    False,
+                    False,
+                    False,
+                    False,
+                    False,
+                    False,
+                    False,
+                    False,
+                    False,
+                    False,
+                    False,
+                    False,
+                    False,
+                    False,
+                    False,
+                    False,
+                    False,
+                    False,
+                    False,
+                    False,
+                    False,
+                    False,
+                ]
+            ])
+            .to(device, dtype=torch.bool)
+            .repeat(batch[OBS_STATE].shape[0], 1)
+        )
 
         # tasks = batch["task"]
         # if isinstance(tasks, str):
@@ -921,60 +929,24 @@ class VLAFlowMatching(nn.Module):
         embs = []
         pad_masks = []
         att_masks = []
-        for _img_idx, (
-            img,
-            img_mask,
-        ) in enumerate(zip(images, img_masks, strict=False)):
-            if self.add_image_special_tokens:
-                image_start_token = (
-                    self.vlm_with_expert.embed_language_tokens(
-                        self.global_image_start_token.to(device=self.vlm_with_expert.vlm.device)
-                    )
-                    .unsqueeze(0)
-                    .expand(img.shape[0], -1, -1)
-                )
-                image_start_mask = torch.ones_like(
-                    image_start_token[:, :, 0], dtype=torch.bool, device=image_start_token.device
-                )
-                att_masks += [0] * (image_start_mask.shape[-1])
-                embs.append(image_start_token)
-                pad_masks.append(image_start_mask)
+        img_emb = self.vlm_with_expert.embed_image(torch.cat(images))
+        img_emb_dim = img_emb.shape[-1]
+        if self.use_image_norm == 1:
+            # Default behaviour
+            img_emb *= torch.tensor(img_emb_dim**0.5, dtype=img_emb.dtype, device=img_emb.device)
+        elif self.use_image_norm == 2:
+            img_emb = torch.nn.functional.normalize(img_emb, p=2, dim=-1)
+        bsize, num_img_embs = images[0].shape[0], img_emb.shape[1]
+        pad_img = torch.stack(img_masks).T[..., None].expand(bsize, len(img_masks), num_img_embs)
+        embs.extend(torch.split(img_emb, bsize))
+        pad_masks.append(pad_img.reshape(bsize, -1))
+        # att_masks += [0] * (num_img_embs) if not self.use_context else [1] + [0] * (num_img_embs - 1)
+        att_masks = [0] * (num_img_embs * len(images))
 
-            img_emb = self.vlm_with_expert.embed_image(img)
-
-            # Normalize image embeddings
-            img_emb_dim = img_emb.shape[-1]
-            if self.use_image_norm == 1:
-                # Default behaviour
-                img_emb = img_emb * torch.tensor(img_emb_dim**0.5, dtype=img_emb.dtype, device=img_emb.device)
-            elif self.use_image_norm == 2:
-                img_emb = torch.nn.functional.normalize(img_emb, p=2, dim=-1)
-
-            bsize, num_img_embs = img_emb.shape[:2]
-            img_mask = img_mask[:, None].expand(bsize, num_img_embs)
-
-            embs.append(img_emb)
-            pad_masks.append(img_mask)
-            # att_masks += [0] * (num_img_embs) if not self.use_context else [1] + [0] * (num_img_embs - 1)
-            att_masks += [0] * (num_img_embs)
-            if self.add_image_special_tokens:
-                image_end_token = (
-                    self.vlm_with_expert.embed_language_tokens(
-                        self.image_end_token.to(device=self.vlm_with_expert.vlm.device)
-                    )
-                    .unsqueeze(0)
-                    .expand(img.shape[0], -1, -1)
-                )
-                image_end_mask = torch.ones_like(
-                    image_end_token[:, :, 0], dtype=torch.bool, device=image_end_token.device
-                )
-                embs.append(image_end_token)
-                pad_masks.append(image_end_mask)
-                att_masks += [0] * (image_end_mask.shape[1])
         lang_emb = self.vlm_with_expert.embed_language_tokens(lang_tokens)
         # Normalize language embeddings
         lang_emb_dim = lang_emb.shape[-1]
-        lang_emb = lang_emb * math.sqrt(lang_emb_dim)
+        lang_emb *= math.sqrt(lang_emb_dim)
 
         embs.append(lang_emb)
         pad_masks.append(lang_masks)
@@ -1120,7 +1092,7 @@ class VLAFlowMatching(nn.Module):
         dt = torch.tensor(dt, dtype=dtype, device=device)
 
         x_t = noise
-        for time in torch.arange(1.0, 0, -1 / 10, dtype=dtype, device=device):
+        for time in torch.arange(1.0, 0, -1.0 / self.config.num_steps, dtype=dtype, device=device):
             expanded_time = time.expand(bsize)
             v_t = self.denoise_step(
                 prefix_pad_masks,

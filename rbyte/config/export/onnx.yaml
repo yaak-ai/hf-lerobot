@@ -8,8 +8,8 @@ defaults:
   - _self_
 
 
-device: cpu
-# device: cuda
+# device: cpu
+device: cuda
 dtype: torch.float16
 # dtype: torch.float32
 f: ${hydra:run.dir}/${model.artifact}.onnx
