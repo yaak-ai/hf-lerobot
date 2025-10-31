@@ -30,7 +30,7 @@ class ExportPolicy(torch.nn.Module):
         return self.policy.predict_action_chunk(batch, noise)
 
 
-def dummy_input(device: torch.device, dtype: torch.dtype) -> dict:
+def dummy_input(device: torch.device, dtype: torch.dtype, bsize: int = 1) -> dict:
     batch = {
         "meta/ImageMetadata.cam_front_left/time_stamp": torch.tensor(
             [
@@ -50,20 +50,20 @@ def dummy_input(device: torch.device, dtype: torch.dtype) -> dict:
             "Given the waypoints and current vehicle speed, follow the waypoints while adhering to traffic rules and regulations"
         ],
         "action.continuous": make_tensor(
-            (1, 50, 3), dtype=dtype, device=device, low=0.0, high=1.0
+            (bsize, 50, 3), dtype=dtype, device=device, low=0.0, high=1.0
         ),
         "observation.images.front_left": make_tensor(
-            (1, 6, 3, 324, 576),
+            (bsize, 6, 3, 324, 576),
             dtype=dtype,
             device=device,
             low=0,
             high=1,
         ),
         "observation.state.vehicle": make_tensor(
-            (1, 6, 1), dtype=dtype, device=device, low=0.0, high=130.0
+            (bsize, 6, 1), dtype=dtype, device=device, low=0.0, high=130.0
         ),
         "observation.state.waypoints": make_tensor(
-            (1, 6, 20),
+            (bsize, 6, 20),
             dtype=dtype,
             device=device,
             low=-148.0924835205078,
@@ -74,7 +74,7 @@ def dummy_input(device: torch.device, dtype: torch.dtype) -> dict:
     noise = torch.normal(
         mean=0.0,
         std=1.0,
-        size=(1, 50, 32),
+        size=(bsize, 50, 32),
         dtype=dtype,
         device=device,
     )
@@ -92,8 +92,15 @@ def episode_input(cfg: DictConfig, device: torch.device, dtype: torch.dtype) -> 
                 batch[k] = v.to(dtype)
             batch[k] = batch[k].to(device)
     im_key = "observation.images.front_left"
-    batch[im_key] = resize_with_pad(batch[im_key][0], 512, 512, pad_value=0)[None, ...]
-    _, noise, time = dummy_input(torch.device(cfg.device), dtype)
+    batch[im_key] = resize_with_pad(
+        torch.reshape(batch[im_key], (-1, *batch[im_key].shape[2:])),
+        512,
+        512,
+        pad_value=0,
+    ).reshape((*batch[im_key].shape[:3], 512, 512))
+    _, noise, time = dummy_input(
+        torch.device(cfg.device), dtype, bsize=batch[im_key].shape[0]
+    )
     batch.pop("meta/ImageMetadata.cam_front_left/time_stamp", None)
     batch.pop("action.continuous", None)
     return batch, noise, time
