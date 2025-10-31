@@ -468,9 +468,11 @@ class LeRobotDataset(torch.utils.data.Dataset):
         self.meta = LeRobotDatasetMetadata(
             self.repo_id, self.root, self.revision, force_cache_sync=force_cache_sync
         )
-        if self.episodes is not None and self.meta._version >= packaging.version.parse("v2.1"):
+        if self.episodes is not None and self.meta._version >= packaging.version.parse("v2.0"):
             episodes_stats = [self.meta.episodes_stats[ep_idx] for ep_idx in self.episodes]
-            self.stats = aggregate_stats(episodes_stats)
+            if self.meta._version >= packaging.version.parse("v2.1"):
+                # v2.0 dont have per episode stat so we reuse global stats
+                self.meta.stats = aggregate_stats(episodes_stats)
         else:
             self.episodes = [ep['episode_index'] for k, ep in self.meta.episodes.items()]
 
