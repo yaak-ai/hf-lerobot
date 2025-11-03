@@ -10,6 +10,7 @@ import torch
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from torch.testing import make_tensor
+from transformers.models.smolvlm.modeling_smolvlm import SmolVLMVisionTransformer
 
 from lerobot.policies.smolvla.conversion_utils_yaak import __getbatch__
 from lerobot.policies.smolvla.modeling_smolvla import resize_with_pad
@@ -25,9 +26,113 @@ class ExportPolicy(torch.nn.Module):
     def __init__(self, policy):
         super().__init__()
         self.policy = policy
+        # self.policy = policy.model.vlm_with_expert.vlm.model.vision_model
+        # self.policy = policy.model
 
     def forward(self, batch, noise):
         return self.policy.predict_action_chunk(batch, noise)
+
+    # def forward_vision(self, images):
+    #     return self.policy.embed_image(images)
+
+    # def forward(self, images, patch_attention_mask):
+    #     return self.policy(
+    #         pixel_values=images,
+    #         patch_attention_mask=patch_attention_mask,
+    #     ).last_hidden_state
+
+    # def forward_fwd(
+    #     self,
+    #     attention_mask: torch.Tensor | None = None,
+    #     position_ids: torch.LongTensor | None = None,
+    #     past_key_values: list[torch.FloatTensor] | None = None,
+    #     inputs_embeds: list[torch.FloatTensor] = None,
+    #     use_cache: bool | None = None,
+    #     fill_kv_cache: bool | None = None,
+    # ):
+    #     return self.policy(
+    #         attention_mask,
+    #         position_ids,
+    #         past_key_values,
+    #         inputs_embeds,
+    #         use_cache,
+    #         fill_kv_cache,
+    #     )
+
+    # def forward(
+    #     self,
+    #     prefix_att_2d_masks,
+    #     prefix_position_ids,
+    #     prefix_embs,
+    #     noise,
+    #     prefix_pad_masks,
+    # ):
+    #     _, past_key_values = self.policy.vlm_with_expert.forward(
+    #         attention_mask=prefix_att_2d_masks,
+    #         position_ids=prefix_position_ids,
+    #         past_key_values=None,
+    #         inputs_embeds=[prefix_embs, None],
+    #         use_cache=True,
+    #         fill_kv_cache=True,
+    #     )
+    #     bsize = prefix_att_2d_masks.shape[0]
+    #     device = prefix_att_2d_masks.device
+    #     dt = -1.0 / self.policy.config.num_steps
+    #     dtype = (
+    #         torch.float32
+    #         if not torch.compiler.is_exporting()
+    #         else self.policy.action_in_proj.weight.dtype
+    #     )
+    #     dt = torch.tensor(dt, dtype=dtype, device=device)
+    #     x_t = noise
+    #     for time in torch.arange(
+    #         1.0, 0, -1.0 / self.policy.config.num_steps, dtype=dtype, device=device
+    #     ):
+    #         expanded_time = time.expand(bsize)
+    #         v_t = self.policy.denoise_step(
+    #             prefix_pad_masks,
+    #             past_key_values,
+    #             x_t,
+    #             expanded_time,
+    #         )
+    #         # Euler step
+    #         x_t += dt * v_t
+    #     return x_t
+
+
+def dummy_vlmexpert(device: torch.device, dtype: torch.dtype, bsize: int = 1) -> dict:
+    attention_mask = torch.load("tmp/attention_mask.pt", map_location=device)
+    position_ids = torch.load("tmp/position_ids.pt", map_location=device)
+    past_key_values = None
+    inputs_embeds_0 = torch.load("tmp/inputs_embeds_0.pt", map_location=device).to(
+        dtype
+    )
+    inputs_embeds = [inputs_embeds_0, None]
+    use_cache = True
+    fill_kv_cache = True
+    return (
+        attention_mask,
+        position_ids,
+        past_key_values,
+        inputs_embeds,
+        use_cache,
+        fill_kv_cache,
+    )
+
+
+def dummy_vla(device: torch.device, dtype: torch.dtype, bsize: int = 1) -> dict:
+    prefix_att_2d_masks = torch.load("tmp/prefix_att_2d_masks.pt", map_location=device)
+    prefix_position_ids = torch.load("tmp/prefix_position_ids.pt", map_location=device)
+    prefix_embs = torch.load("tmp/prefix_embs.pt", map_location=device).to(dtype)
+    noise = torch.load("tmp/noise.pt", map_location=device).to(dtype)
+    prefix_pad_masks = torch.load("tmp/prefix_pad_masks.pt", map_location=device)
+    return (
+        prefix_att_2d_masks,
+        prefix_position_ids,
+        prefix_embs,
+        noise,
+        prefix_pad_masks,
+    )
 
 
 def dummy_input(device: torch.device, dtype: torch.dtype, bsize: int = 1) -> dict:
@@ -83,7 +188,9 @@ def dummy_input(device: torch.device, dtype: torch.dtype, bsize: int = 1) -> dic
     return batch, noise, time
 
 
-def episode_input(cfg: DictConfig, device: torch.device, dtype: torch.dtype) -> dict:
+def episode_input(
+    cfg: DictConfig, device: torch.device, dtype: torch.dtype, normalize_image=False
+) -> dict:
     dataloader_test: DataLoader = instantiate(cfg.datamodule)
     batch = __getbatch__(next(iter(dataloader_test)))
     for k, v in batch.items():
@@ -98,6 +205,9 @@ def episode_input(cfg: DictConfig, device: torch.device, dtype: torch.dtype) -> 
         512,
         pad_value=0,
     ).reshape((*batch[im_key].shape[:3], 512, 512))
+    if normalize_image:
+        batch[im_key] *= 2.0
+        batch[im_key] -= 1.0
     _, noise, time = dummy_input(
         torch.device(cfg.device), dtype, bsize=batch[im_key].shape[0]
     )
@@ -216,24 +326,37 @@ def export_dynamo(cfg: DictConfig) -> None:
     policy_vla, _ = prepare_model_data(cfg, dtype)
 
     # temporary hack
-    policy_vla.config.num_steps = 1
+    # policy_vla.config.num_steps = 1
     policy_vla.config.resize_imgs_with_padding = None
-
-    args = episode_input(cfg, torch.device(cfg.device), dtype)
 
     policy: ExportPolicy = ExportPolicy(policy_vla)
     policy = torch.compile(policy)
     policy.eval()
+    # LLM fwd pass only (forward_fwd)
+    # args = dummy_vlmexpert(torch.device(cfg.device), dtype, bsize=1)
+
+    # LLM fwd and BWD passes (policy.model w denoising)
+    # args = dummy_vla(torch.device(cfg.device), dtype, bsize=1)
+
+    # SigLip args only (policy.model.vlm_with_expert.vlm.model.vision_model)
+    # args = args[0]["observation.images.front_left"][:1, :1, ...]
+    # args = (args.reshape((-1, *args.shape[2:])), None)  # remove batch dim
+
+    args = episode_input(
+        cfg,
+        torch.device(cfg.device),
+        dtype,
+        isinstance(policy.policy, SmolVLMVisionTransformer),
+    )
+    args = args[:-1]
 
     # with torch.inference_mode(), pytest.MonkeyPatch.context() as m:
     #     m.setattr("torch.compiler._is_exporting_flag", True)  # noqa: ERA001
-    #     result = policy(*args[:-1])  # noqa: ERA001
+    #     result = policy(*args)  # noqa: ERA001
 
     logging.info("torch exporting")  # noqa: LOG015
-    exported_program = torch.export.export(
-        mod=policy, args=tuple(args[:-1]), strict=True
-    )
 
+    exported_program = torch.export.export(mod=policy, args=tuple(args), strict=True)
     dest = Path(cfg["f"])
     dest.parent.mkdir(parents=True, exist_ok=True)
     torch.export.save(exported_program, dest.parent / "dynamo_exported.pt2")
