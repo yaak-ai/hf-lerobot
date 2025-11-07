@@ -326,21 +326,17 @@ def export_dynamo(cfg: DictConfig) -> None:
     policy_vla, _ = prepare_model_data(cfg, dtype)
 
     # temporary hack
-    # policy_vla.config.num_steps = 1
+    # policy_vla.config.num_steps = 1  # noqa: ERA001
     policy_vla.config.resize_imgs_with_padding = None
 
     policy: ExportPolicy = ExportPolicy(policy_vla)
     policy = torch.compile(policy)
     policy.eval()
     # LLM fwd pass only (forward_fwd)
-    # args = dummy_vlmexpert(torch.device(cfg.device), dtype, bsize=1)
+    # args = dummy_vlmexpert(torch.device(cfg.device), dtype, bsize=1)  # noqa: ERA001
 
     # LLM fwd and BWD passes (policy.model w denoising)
-    # args = dummy_vla(torch.device(cfg.device), dtype, bsize=1)
-
-    # SigLip args only (policy.model.vlm_with_expert.vlm.model.vision_model)
-    # args = args[0]["observation.images.front_left"][:1, :1, ...]
-    # args = (args.reshape((-1, *args.shape[2:])), None)  # remove batch dim
+    # args = dummy_vla(torch.device(cfg.device), dtype, bsize=1)  # noqa: ERA001
 
     args = episode_input(
         cfg,
@@ -350,10 +346,13 @@ def export_dynamo(cfg: DictConfig) -> None:
     )
     args = args[:-1]
 
-    # with torch.inference_mode(), pytest.MonkeyPatch.context() as m:
-    #     m.setattr("torch.compiler._is_exporting_flag", True)  # noqa: ERA001
-    #     result = policy(*args)  # noqa: ERA001
+    # SigLip args only (policy.model.vlm_with_expert.vlm.model.vision_model)
+    # args = args[0]["observation.images.front_left"][:1, :, ...]  # noqa: ERA001
+    # args = (args.reshape((-1, *args.shape[2:])), None)  # remove batch dim  # noqa: ERA001
 
+    # with torch.inference_mode(), pytest.MonkeyPatch.context() as m:  # noqa: SIM117
+    #     m.setattr("torch.compiler._is_exporting_flag", True)  # noqa: ERA001
+    #     result = policy(*args) # noqa: ERA001
     logging.info("torch exporting")  # noqa: LOG015
 
     exported_program = torch.export.export(mod=policy, args=tuple(args), strict=True)

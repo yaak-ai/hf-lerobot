@@ -1011,18 +1011,20 @@ class VLAFlowMatching(nn.Module):
 
         # Add to input tokens
         embs.append(action_time_emb)
-
-        bsize, action_time_dim = action_time_emb.shape[:2]
-        action_time_mask = torch.ones(bsize, action_time_dim, dtype=torch.bool, device=device)
-        pad_masks.append(action_time_mask)
-
-        # Set attention masks so that image, language and state inputs do not attend to action tokens
-        att_masks += [1] * self.config.chunk_size
         embs = torch.cat(embs, dim=1)
-        pad_masks = torch.cat(pad_masks, dim=1)
-        att_masks = torch.tensor(att_masks, dtype=embs.dtype, device=embs.device)
-        att_masks = att_masks[None, :].expand(bsize, len(att_masks))
-        return embs, pad_masks, att_masks
+
+        if torch.compiler.is_exporting():
+            bsize, action_time_dim = action_time_emb.shape[:2]
+            action_time_mask = torch.ones(bsize, action_time_dim, dtype=torch.bool, device=device)
+            pad_masks.append(action_time_mask)
+
+            # Set attention masks so that image, language and state inputs do not attend to action tokens
+            att_masks += [1] * self.config.chunk_size
+            pad_masks = torch.cat(pad_masks, dim=1)
+            att_masks = torch.tensor(att_masks, dtype=embs.dtype, device=embs.device)
+            att_masks = att_masks[None, :].expand(bsize, len(att_masks))
+            return embs, pad_masks, att_masks
+        return embs, None, None
 
     def forward(
         self, images, img_masks, lang_tokens, lang_masks, state, actions, noise=None, time=None
@@ -1091,14 +1093,21 @@ class VLAFlowMatching(nn.Module):
         dtype = torch.float32 if not torch.compiler.is_exporting() else self.action_in_proj.weight.dtype
         dt = torch.tensor(dt, dtype=dtype, device=device)
 
+        suffix_att_2d_masks = torch.tril(torch.ones(bsize, self.config.chunk_size, self.config.chunk_size, dtype=torch.bool))
+        prefix_pad_2d_masks = prefix_pad_masks[:, None, :].expand(bsize, self.config.chunk_size, prefix_pad_masks.shape[1])
+        full_att_2d_masks = torch.cat([prefix_pad_2d_masks, suffix_att_2d_masks], dim=2)
+        position_ids = torch.cumsum(torch.ones(bsize, self.config.chunk_size, dtype=torch.bool, device=device), dim=1) - 1
+        position_ids += torch.sum(prefix_pad_masks, dim=-1)[:, None]
+
         x_t = noise
         for time in torch.arange(1.0, 0, -1.0 / self.config.num_steps, dtype=dtype, device=device):
             expanded_time = time.expand(bsize)
             v_t = self.denoise_step(
-                prefix_pad_masks,
                 past_key_values,
                 x_t,
                 expanded_time,
+                full_att_2d_masks,
+                position_ids,
             )
             # Euler step
             x_t += dt * v_t
@@ -1106,24 +1115,14 @@ class VLAFlowMatching(nn.Module):
 
     def denoise_step(
         self,
-        prefix_pad_masks,
         past_key_values,
         x_t,
         timestep,
+        full_att_2d_masks,
+        position_ids,
     ):
         """Apply one denoising step of the noise `x_t` at a given timestep."""
-        suffix_embs, suffix_pad_masks, suffix_att_masks = self.embed_suffix(x_t, timestep)
-
-        suffix_len = suffix_pad_masks.shape[1]
-        batch_size = prefix_pad_masks.shape[0]
-        prefix_len = prefix_pad_masks.shape[1]
-        prefix_pad_2d_masks = prefix_pad_masks[:, None, :].expand(batch_size, suffix_len, prefix_len)
-
-        suffix_att_2d_masks = make_att_2d_masks(suffix_pad_masks, suffix_att_masks)
-
-        full_att_2d_masks = torch.cat([prefix_pad_2d_masks, suffix_att_2d_masks], dim=2)
-        prefix_offsets = torch.sum(prefix_pad_masks, dim=-1)[:, None]
-        position_ids = prefix_offsets + torch.cumsum(suffix_pad_masks, dim=1) - 1
+        suffix_embs, _, _ = self.embed_suffix(x_t, timestep)
 
         outputs_embeds, _ = self.vlm_with_expert.forward(
             attention_mask=full_att_2d_masks,
