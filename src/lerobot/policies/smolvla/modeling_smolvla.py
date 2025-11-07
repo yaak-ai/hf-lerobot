@@ -1093,7 +1093,7 @@ class VLAFlowMatching(nn.Module):
         dtype = torch.float32 if not torch.compiler.is_exporting() else self.action_in_proj.weight.dtype
         dt = torch.tensor(dt, dtype=dtype, device=device)
 
-        suffix_att_2d_masks = torch.tril(torch.ones(bsize, self.config.chunk_size, self.config.chunk_size, dtype=torch.bool))
+        suffix_att_2d_masks = torch.tril(torch.ones(bsize, self.config.chunk_size, self.config.chunk_size, dtype=torch.bool)).to(device)
         prefix_pad_2d_masks = prefix_pad_masks[:, None, :].expand(bsize, self.config.chunk_size, prefix_pad_masks.shape[1])
         full_att_2d_masks = torch.cat([prefix_pad_2d_masks, suffix_att_2d_masks], dim=2)
         position_ids = torch.cumsum(torch.ones(bsize, self.config.chunk_size, dtype=torch.bool, device=device), dim=1) - 1
