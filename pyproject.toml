@@ -157,7 +157,7 @@ all = [
     "lerobot[intelrealsense]",
     "lerobot[pi]",
     "lerobot[smolvla]",
-    # "lerobot[groot]", TODO(Steven): Gr00t requires specific installation instructions for flash-attn
+    "lerobot[groot]",
     "lerobot[hilserl]",
     "lerobot[async]",
     "lerobot[dev]",
@@ -256,6 +256,9 @@ default.extend-ignore-identifiers-re = [
     "thw",
     "inpt",
 ]
+
+[tool.uv.extra-build-dependencies]
+      flash-attn = ["torch"]
 
 # TODO: Uncomment when ready to use
 # [tool.interrogate]
