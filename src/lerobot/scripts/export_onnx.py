@@ -37,9 +37,37 @@ class ExportPolicy(torch.nn.Module):
 
     # def forward(self, images, patch_attention_mask):
     #     return self.policy(
-    #         pixel_values=images,
-    #         patch_attention_mask=patch_attention_mask,
-    #     ).last_hidden_state
+    #             pixel_values=images,
+    #             patch_attention_mask=patch_attention_mask,
+    #         ).last_hidden_state
+
+    # def forward(self, current_image, obs_hist_1, obs_hist2, obs_hist3, obs_hist4, obs_hist5, patch_attention_mask):
+    #     current_emb = self.policy(
+    #             pixel_values=current_image,
+    #             patch_attention_mask=patch_attention_mask,
+    #         ).last_hidden_state
+    #     hist1 = self.policy(
+    #             pixel_values=obs_hist_1,
+    #             patch_attention_mask=patch_attention_mask,
+    #         ).last_hidden_state
+    #     hist2 = self.policy(
+    #             pixel_values=obs_hist2,
+    #             patch_attention_mask=patch_attention_mask,
+    #         ).last_hidden_state
+    #     hist3 = self.policy(
+    #             pixel_values=obs_hist3,
+    #             patch_attention_mask=patch_attention_mask,
+    #         ).last_hidden_state
+    #     hist4 = self.policy(
+    #             pixel_values=obs_hist4,
+    #             patch_attention_mask=patch_attention_mask,
+    #         ).last_hidden_state
+    #     hist5 = self.policy(
+    #             pixel_values=obs_hist5,
+    #             patch_attention_mask=patch_attention_mask,
+    #         ).last_hidden_state
+    #     return torch.cat([current_emb, hist1, hist2, hist3, hist4, hist5], dim=0)
+
 
     # def forward_fwd(
     #     self,
@@ -89,7 +117,7 @@ class ExportPolicy(torch.nn.Module):
     #         1.0, 0, -1.0 / self.policy.config.num_steps, dtype=dtype, device=device
     #     ):
     #         expanded_time = time.expand(bsize)
-    #         v_t = self.policy.denoise_step(
+    #         v_t = self.policy.denoise_step_orig(
     #             prefix_pad_masks,
     #             past_key_values,
     #             x_t,
@@ -98,6 +126,53 @@ class ExportPolicy(torch.nn.Module):
     #         # Euler step
     #         x_t += dt * v_t
     #     return x_t
+
+    # def forward(
+    #     self,
+    #     prefix_att_2d_masks,
+    #     past_key_values,
+    #     noise,
+    #     prefix_pad_masks,
+    # ):
+    #     bsize = prefix_att_2d_masks.shape[0]
+    #     device = prefix_att_2d_masks.device
+    #     dt = -1.0 / self.policy.config.num_steps
+    #     dtype = (
+    #         torch.float32
+    #         if not torch.compiler.is_exporting()
+    #         else self.policy.action_in_proj.weight.dtype
+    #     )
+    #     dt = torch.tensor(dt, dtype=dtype, device=device)
+    #     x_t = noise
+    #     for time in torch.arange(
+    #         1.0, 0, -1.0 / self.policy.config.num_steps, dtype=dtype, device=device
+    #     ):
+    #         expanded_time = time.expand(bsize)
+    #         v_t = self.policy.denoise_step_orig(
+    #             prefix_pad_masks,
+    #             past_key_values,
+    #             x_t,
+    #             expanded_time,
+    #         )
+    #         # Euler step
+    #         x_t += dt * v_t
+    #     return x_t
+
+    # def forward(
+    #     self,
+    #     prefix_att_2d_masks,
+    #     prefix_position_ids,
+    #     prefix_embs,
+    # ):
+    #     _, past_key_values = self.policy.vlm_with_expert.forward(
+    #         attention_mask=prefix_att_2d_masks,
+    #         position_ids=prefix_position_ids,
+    #         past_key_values=None,
+    #         inputs_embeds=[prefix_embs, None],
+    #         use_cache=True,
+    #         fill_kv_cache=True,
+    #     )
+    #     return past_key_values
 
 
 def dummy_vlmexpert(device: torch.device, dtype: torch.dtype, bsize: int = 1) -> dict:
@@ -110,7 +185,7 @@ def dummy_vlmexpert(device: torch.device, dtype: torch.dtype, bsize: int = 1) ->
     inputs_embeds = [inputs_embeds_0, None]
     use_cache = True
     fill_kv_cache = True
-    return (
+    return (  # pyright: ignore[reportReturnType]
         attention_mask,
         position_ids,
         past_key_values,
@@ -126,10 +201,34 @@ def dummy_vla(device: torch.device, dtype: torch.dtype, bsize: int = 1) -> dict:
     prefix_embs = torch.load("tmp/prefix_embs.pt", map_location=device).to(dtype)
     noise = torch.load("tmp/noise.pt", map_location=device).to(dtype)
     prefix_pad_masks = torch.load("tmp/prefix_pad_masks.pt", map_location=device)
-    return (
+    return (  # pyright: ignore[reportReturnType]
         prefix_att_2d_masks,
         prefix_position_ids,
         prefix_embs,
+        noise,
+        prefix_pad_masks,
+    )
+
+
+def dummy_obs(device: torch.device, dtype: torch.dtype, bsize: int = 1) -> dict:
+    prefix_att_2d_masks = torch.load("tmp/prefix_att_2d_masks.pt", map_location=device)
+    prefix_position_ids = torch.load("tmp/prefix_position_ids.pt", map_location=device)
+    prefix_embs = torch.load("tmp/prefix_embs.pt", map_location=device).to(dtype)
+    return (  # pyright: ignore[reportReturnType]
+        prefix_att_2d_masks,
+        prefix_position_ids,
+        prefix_embs,
+    )
+
+
+def dummy_denoise(device: torch.device, dtype: torch.dtype, bsize: int = 1) -> dict:
+    prefix_att_2d_masks = torch.load("tmp/prefix_att_2d_masks.pt", map_location=device)
+    past_key_values = torch.load("tmp/past_key_values.pt", map_location=device)
+    noise = torch.load("tmp/noise.pt", map_location=device).to(dtype)
+    prefix_pad_masks = torch.load("tmp/prefix_pad_masks.pt", map_location=device)
+    return (  # pyright: ignore[reportReturnType]
+        prefix_att_2d_masks,
+        past_key_values,
         noise,
         prefix_pad_masks,
     )
@@ -185,7 +284,7 @@ def dummy_input(device: torch.device, dtype: torch.dtype, bsize: int = 1) -> dic
     )
     # 3rd arg: always torch.float32
     time = torch.tensor([0.5], device=device, dtype=torch.float32)
-    return batch, noise, time
+    return batch, noise, time  # pyright: ignore[reportReturnType]
 
 
 def episode_input(
@@ -330,13 +429,19 @@ def export_dynamo(cfg: DictConfig) -> None:
     policy_vla.config.resize_imgs_with_padding = None
 
     policy: ExportPolicy = ExportPolicy(policy_vla)
-    policy = torch.compile(policy)
+    # policy = torch.compile(policy)  # noqa: ERA001
     policy.eval()
     # LLM fwd pass only (forward_fwd)
     # args = dummy_vlmexpert(torch.device(cfg.device), dtype, bsize=1)  # noqa: ERA001
 
     # LLM fwd and BWD passes (policy.model w denoising)
     # args = dummy_vla(torch.device(cfg.device), dtype, bsize=1)  # noqa: ERA001
+
+    # LLM denoise
+    # args = dummy_denoise(torch.device(cfg.device), dtype, bsize=1)  # noqa: ERA001
+
+    # LLM obs
+    # args = dummy_obs(torch.device(cfg.device), dtype, bsize=1)  # noqa: ERA001
 
     args = episode_input(
         cfg,
@@ -349,6 +454,12 @@ def export_dynamo(cfg: DictConfig) -> None:
     # SigLip args only (policy.model.vlm_with_expert.vlm.model.vision_model)
     # args = args[0]["observation.images.front_left"][:1, :, ...]  # noqa: ERA001
     # args = (args.reshape((-1, *args.shape[2:])), None)  # remove batch dim  # noqa: ERA001
+
+    # Sequential SigLip args
+    # args = args[0]["observation.images.front_left"][0, :, ...]  # noqa: ERA001
+    # args = torch.split(args, 1)  # noqa: ERA001
+    # args = list(args)  # noqa: ERA001
+    # args.append(None)  # noqa: ERA001
 
     # with torch.inference_mode(), pytest.MonkeyPatch.context() as m:  # noqa: SIM117
     #     m.setattr("torch.compiler._is_exporting_flag", True)  # noqa: ERA001
@@ -364,7 +475,7 @@ def export_dynamo(cfg: DictConfig) -> None:
     logging.info("torch export done")  # noqa: LOG015
 
     logging.info("onnx exporting")  # noqa: LOG015
-    model = torch.onnx.export(
+    _ = torch.onnx.export(
         model=exported_program,
         args=tuple(args),
         f=cfg["f"],
@@ -375,6 +486,8 @@ def export_dynamo(cfg: DictConfig) -> None:
         verify=True,
         report=True,
         dump_exported_program=True,
+        opset_version=19,
+        do_constant_folding=True,
     )
 
     logging.info(f"exported to {cfg['artifacts_dir']}")  # noqa: G004, LOG015
