@@ -90,7 +90,8 @@ dependencies = [
     "duckdb>=1.2.2",
     "polars<=1.33.1",
     "rbyte[geo,jpeg,yaak]==0.30.0",
-    "matplotlib"
+    "matplotlib",
+    "timm==1.0.22"
 ]
 
 # Optional dependencies

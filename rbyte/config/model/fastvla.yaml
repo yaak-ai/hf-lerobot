@@ -1,0 +1,5 @@
+_target_: lerobot.policies.fastvla.modeling_fastvla.FastVLAPolicy
+config:
+  _target_: lerobot.policies.fastvla.configuration_fastvla.FastVLAConfig
+  vlm_model_name: "apple/FastVLM-0.5B"
+  image_token_index: -200

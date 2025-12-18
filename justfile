@@ -45,3 +45,9 @@ export-onnx *ARGS:
         --config-path {{ justfile_directory() }}/rbyte/config \
         --config-name export/onnx.yaml \
         {{ ARGS }}
+
+export-fast *ARGS: generate-config
+    uv run src/lerobot/scripts/export_onnx_fast.py \
+        --config-path {{ justfile_directory() }}/rbyte/config \
+        --config-name export/onnx_fast.yaml \
+        {{ ARGS }}
