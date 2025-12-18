@@ -1,0 +1,48 @@
+# @package _global_
+
+---
+defaults:
+  - /paths: yaak/default
+  - /model: fastvla
+  - _self_
+
+target_resolution: 256
+
+image_load:
+  _target_: PIL.Image.open
+  fp: "/nasa/drives/yaak/data/Niro115-HQ/2023-05-16--10-47-33/frames/cam_front_left.pii.mp4/576x324/000020780.jpg"
+image_processor:
+  _target_: lerobot.policies.fastvla.modeling_fastvla.FastImageTokenizer
+  _recursive_: true
+  _convert_: "all"
+  crop_size:
+    height: ${target_resolution}
+    width: ${target_resolution}
+  image_mean: [0.0, 0.0, 0.0]
+  image_std: [1.0, 1.0, 1.0]
+  size:
+    shortest_edge: ${target_resolution}
+
+
+device: cuda
+dtype: torch.float16
+
+
+dynamo_kwargs:
+  _recursive_: true
+  _convert_: all
+  strict: true
+
+onnx_kwargs:
+  _recursive_: true
+  _convert_: all
+  f: ${hydra:run.dir}/fastvithd.onnx
+  artifacts_dir: ${hydra:run.dir}
+  dynamo: true
+  external_data: false
+  optimize: true
+  verify: true
+  report: true
+  dump_exported_program: true
+  opset_version: 19
+  do_constant_folding: true
