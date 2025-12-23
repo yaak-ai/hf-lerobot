@@ -16,10 +16,26 @@ from lerobot.policies.smolvla.conversion_utils_yaak import __getbatch__
 from lerobot.policies.smolvla.modeling_smolvla import resize_with_pad
 from lerobot.policies.utils import get_device_from_parameters
 from lerobot.utils.utils import init_logging
+from lerobot.utils.wandb_utils import WandBLogger
 
 if TYPE_CHECKING:
     from omegaconf import DictConfig
     from torch.utils.data import DataLoader
+
+
+class ExportVisionTower(torch.nn.Module):
+    def __init__(self, policy):
+        super().__init__()
+        self.policy = policy.model.vlm_with_expert.vlm.model.vision_model
+        self.connector = policy.model.vlm_with_expert.vlm.model.connector
+
+    def forward(self, images, patch_attention_mask):
+        return self.connector(
+            self.policy(
+                pixel_values=images,
+                patch_attention_mask=patch_attention_mask,
+            ).last_hidden_state
+        )
 
 
 class ExportPolicy(torch.nn.Module):
@@ -67,7 +83,6 @@ class ExportPolicy(torch.nn.Module):
     #             patch_attention_mask=patch_attention_mask,
     #         ).last_hidden_state
     #     return torch.cat([current_emb, hist1, hist2, hist3, hist4, hist5], dim=0)
-
 
     # def forward_fwd(
     #     self,
@@ -299,11 +314,11 @@ def episode_input(
             batch[k] = batch[k].to(device)
     im_key = "observation.images.front_left"
     batch[im_key] = resize_with_pad(
-        torch.reshape(batch[im_key], (-1, *batch[im_key].shape[2:])),
+        torch.reshape(batch[im_key], (-1, *batch[im_key].shape[-3:])),
         512,
         512,
         pad_value=0,
-    ).reshape((*batch[im_key].shape[:3], 512, 512))
+    ).reshape((*batch[im_key].shape[:-2], 512, 512))
     if normalize_image:
         batch[im_key] *= 2.0
         batch[im_key] -= 1.0
@@ -319,110 +334,66 @@ def episode_input(
 @torch.inference_mode()
 def main(cfg: DictConfig) -> None:
     export_dynamo(cfg)
-    # test_fp16_tradeoff(cfg)
-    # test_onnx_export(cfg)
-
-
-def export_onnx_only(cfg: DictConfig) -> None:
-    logging.debug("instantiating policy")  # noqa: LOG015
-    policy, _ = instantiate(cfg.model)
-    device = get_device_from_parameters(policy)
-    policy.eval()
-
-    logging.debug("torch exporting")  # noqa: LOG015
-    batch, noise, time = dummy_input(device)
-    torch.onnx.export(
-        policy,
-        (batch, noise, time),
-        "policy.onnx",
-        export_params=True,
-        do_constant_folding=True,
-        input_names=["batch", "noise", "time"],
-        output_names=["loss"],
-        dynamic_axes={
-            "batch": {0: "batch_size"},
-            "noise": {0: "batch_size"},
-        },
-    )
 
 
 def prepare_model_data(cfg: DictConfig, dtype: torch.dtype) -> None:
     logging.debug("instantiating policy")  # noqa: LOG015
-    policy, _ = instantiate(cfg.model)
+    with torch.inference_mode(), pytest.MonkeyPatch.context() as m: 
+        m.setattr("torch.compiler._is_exporting_flag", True)
+        policy, train_cfg = instantiate(cfg.model)
 
     policy = policy.to(dtype).to(cfg.device)
+    policy.eval()
 
     device = get_device_from_parameters(policy)
     args = dummy_input(device, dtype)
-    return policy, args
+    return policy, train_cfg, args
 
 
-def test_fp16_tradeoff(cfg: DictConfig) -> None:  # noqa: PLR0914
-    policy, _ = prepare_model_data(cfg, torch.float32)
-    dtype = torch.float16 if cfg.dtype == "torch.float16" else torch.float32
-    policy_export, _ = prepare_model_data(cfg, dtype)
-    n_rollouts = 10
-    device = get_device_from_parameters(policy)
-    metric = torch.nn.CosineSimilarity(dim=-1)
-    l1_over_horizon = torch.zeros(
-        (n_rollouts, 50, 3), dtype=torch.float32, device=cfg.device
-    )
-    cosine_flat = torch.zeros((n_rollouts,), dtype=torch.float32, device=cfg.device)
-    cosine_over_horizon = torch.zeros(
-        (n_rollouts, 50), dtype=torch.float32, device=cfg.device
-    )
-    l1_mean = torch.zeros((n_rollouts,), dtype=torch.float32, device=cfg.device)
-    for i in range(n_rollouts):
-        args = dummy_input(device, torch.float32)
-        args_export = [
-            {
-                k: deepcopy(v).to(dtype) if isinstance(v, torch.Tensor) else deepcopy(v)
-                for k, v in args[0].items()
-            }
-        ]
-        args_export.extend([args[1].to(dtype), args[-1]])
-        result = policy(*args)
-        # simulate exporting
-        with torch.inference_mode(), pytest.MonkeyPatch.context() as m:
-            m.setattr("torch.compiler._is_exporting_flag", True)
-            result_export = policy_export(*args_export)
+def export_lm_expert(policy_vla, args, dynamo_kwargs, onnx_kwargs):
+    pass
 
-            l1_mean[i] = torch.abs(result_export[0] - result[0])
-            l1_over_horizon[i, ...] = torch.abs(result_export[1] - result[1])[..., :3]
-            # cosine similarity: compare each of 50 action vectors separately
-            horizon_tensorrt = result_export[1].to(torch.float32)[..., :3]
-            horizon_torch = result[1][..., :3]
-            cosine_over_horizon[i, ...] = metric(horizon_tensorrt, horizon_torch)
-            # cosine similarity: just flat out 50x3 vectors into a single vector
-            # (Gr00t style) & compute the angle
-            cosine_flat[i] = metric(horizon_tensorrt.flatten(), horizon_torch.flatten())
 
-    logging.info(f"Per element l1 mean {l1_over_horizon.mean():.4f}")  # noqa: G004, LOG015
-    logging.info(f"l1 95th quantile {l1_over_horizon.quantile(0.95):.4f}")  # noqa: G004, LOG015
-    logging.info(f"l1 mean of means {l1_mean.mean():.4f}")  # noqa: G004, LOG015
+def export_vision(policy_vla, args, dynamo_kwargs, onnx_kwargs, wandb_logger):
+    policy = ExportVisionTower(policy_vla)
 
-    stat = cosine_over_horizon.mean()
-    logging.info(  # noqa: LOG015
-        f"Cosine similarity per horizon mean {torch.rad2deg(torch.acos(stat)):.4f} deg ({stat:.4f})"  # noqa: G004
+    # SigLip args only (policy.model.vlm_with_expert.vlm.model.vision_model)
+    images = args[0]["observation.images.front_left"][:1, :, ...]
+    images = images.reshape((
+        -1,
+        *images.shape[2:],
+    ))
+    args = (
+        images,
+        # torch.ones((images.shape[0], 32, 32), dtype=torch.bool, device=images.device),
     )
-    stat = cosine_over_horizon.quantile(0.95)
-    logging.info(  # noqa: LOG015
-        f"Cosine similarity per horizon 95th quantile {torch.rad2deg(torch.acos(stat)):.4f} deg ({stat:.4f})"  # noqa: E501, G004
-    )
-    stat = cosine_flat.mean()
-    logging.info(  # noqa: LOG015
-        f"Cosine similarity flat mean {torch.rad2deg(torch.acos(stat)):.4f} deg ({stat:.4f})"  # noqa: E501, G004
-    )
-    stat = cosine_flat.quantile(0.95)
-    logging.info(  # noqa: LOG015
-        f"Cosine similarity flat 95th quantile {torch.rad2deg(torch.acos(stat)):.4f} deg ({stat:.4f})"  # noqa: E501, G004
-    )
+
+    # with torch.inference_mode(), pytest.MonkeyPatch.context() as m:  # noqa: SIM117
+    #     m.setattr("torch.compiler._is_exporting_flag", True)  # noqa: ERA001
+    #     result = policy(*args)  # noqa: ERA001
+
+
+    exported_program = torch.export.export(mod=policy, args=(images,), **dynamo_kwargs)
+    # _ = torch.onnx.export(model=exported_program, args=tuple(args), **onnx_kwargs)
+    # wandb_logger.log_onnx(Path(onnx_kwargs["artifacts_dir"]))
+    exit(0)
 
 
 def export_dynamo(cfg: DictConfig) -> None:
     logging.debug("instantiating policy")  # noqa: LOG015
-    dtype = torch.float16 if cfg.dtype == "torch.float16" else torch.float32
-    policy_vla, _ = prepare_model_data(cfg, dtype)
+    dtype = torch.bfloat16
+    # dtype = torch.float16 if cfg.dtype == "torch.float16" else torch.float32
+    policy_vla, policy_cfg, _ = prepare_model_data(cfg, dtype)
+
+    policy_cfg.job_name = cfg.job_name
+    policy_cfg.output_dir = cfg.artifacts_dir
+    wandb_logger = WandBLogger(policy_cfg)
+
+    dynamo_kwargs = instantiate(cfg.dynamo_kwargs)
+    onnx_kwargs = instantiate(cfg.onnx_kwargs)
+    vision_kwargs = instantiate(cfg.vision_kwargs)
+    shape_kwargs = instantiate(cfg.shape_kwargs)
+    lm_expert_kwargs = instantiate(cfg.lm_expert_kwargs)
 
     # temporary hack
     # policy_vla.config.num_steps = 1  # noqa: ERA001
@@ -448,8 +419,7 @@ def export_dynamo(cfg: DictConfig) -> None:
         torch.device(cfg.device),
         dtype,
         isinstance(policy.policy, SmolVLMVisionTransformer),
-    )
-    args = args[:-1]
+    )[:-1]
 
     # SigLip args only (policy.model.vlm_with_expert.vlm.model.vision_model)
     # args = args[0]["observation.images.front_left"][:1, :, ...]  # noqa: ERA001
@@ -461,74 +431,21 @@ def export_dynamo(cfg: DictConfig) -> None:
     # args = list(args)  # noqa: ERA001
     # args.append(None)  # noqa: ERA001
 
-    # with torch.inference_mode(), pytest.MonkeyPatch.context() as m:  # noqa: SIM117
-    #     m.setattr("torch.compiler._is_exporting_flag", True)  # noqa: ERA001
-    #     result = policy(*args) # noqa: ERA001
-    logging.info("torch exporting")  # noqa: LOG015
-
-    exported_program = torch.export.export(mod=policy, args=tuple(args), strict=True)
-    dest = Path(cfg["f"])
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    torch.export.save(exported_program, dest.parent / "dynamo_exported.pt2")
-    # exported_program = torch.export.load(dest.parent / "dynamo_exported.pt2")  # noqa: E501, ERA001
-    # result = exported_program.module()(*args)  # noqa: ERA001
-    logging.info("torch export done")  # noqa: LOG015
-
-    logging.info("onnx exporting")  # noqa: LOG015
-    _ = torch.onnx.export(
-        model=exported_program,
-        args=tuple(args),
-        f=cfg["f"],
-        artifacts_dir=cfg["artifacts_dir"],
-        external_data=False,
-        dynamo=True,
-        optimize=True,
-        verify=True,
-        report=True,
-        dump_exported_program=True,
-        opset_version=19,
-        do_constant_folding=True,
+    export_vision(
+        policy_vla, args, {**dynamo_kwargs, **shape_kwargs}, {**onnx_kwargs, **vision_kwargs}, wandb_logger
     )
 
+    with torch.inference_mode(), pytest.MonkeyPatch.context() as m:  # noqa: SIM117
+        m.setattr("torch.compiler._is_exporting_flag", True)  # noqa: ERA001
+        result = policy(*args)  # noqa: ERA001
+    logging.info("torch exporting")  # noqa: LOG015
+
+    exported_program = torch.export.export(mod=policy, args=(args), **dynamo_kwargs)
+
+    _ = torch.onnx.export(model=exported_program, args=tuple(args), **onnx_kwargs)
+    # wandb_logger.log_onnx(cfg["artifacts_dir"])
+
     logging.info(f"exported to {cfg['artifacts_dir']}")  # noqa: G004, LOG015
-
-
-def test_onnx_export(cfg: DictConfig) -> None:
-    session = ort.InferenceSession(cfg.test.path)
-    dtype = torch.float16 if cfg.dtype == "torch.float16" else torch.float32
-    args = dummy_input(torch.device(cfg.device), dtype)
-
-    inputs = session.get_inputs()
-    names = [input_arg.name for input_arg in inputs]
-    # Assign inputs by name if possible
-    input_feed_dict = {
-        "batch_" + k.lower().replace("/", "_").replace(".", "_"): v.numpy()
-        for k, v in args[0].items()
-        if "batch_" + k.lower().replace("/", "_").replace(".", "_") in names
-    }
-    not_assigned = {
-        k: v
-        for k, v in args[0].items()
-        if "batch_" + k.lower().replace("/", "_").replace(".", "_") not in names
-    }
-    if "noise" in names:
-        input_feed_dict["noise"] = args[1].numpy()
-    if "time" in names:
-        input_feed_dict["time"] = args[2].numpy()
-
-    # Assign remaining inputs by shape
-    for input_val in inputs:
-        if input_val.name in input_feed_dict:
-            continue
-        for k, v in not_assigned.items():
-            if isinstance(v, torch.Tensor) and torch.Size(input_val.shape) == v.shape:
-                input_feed_dict[input_val.name] = v.numpy()
-                not_assigned.pop(k)
-                break
-
-    # Run inference
-    outputs = session.run(None, input_feed_dict)
-    logging.info(f"Outputs: {outputs}")  # noqa: G004, LOG015
 
 
 if __name__ == "__main__":

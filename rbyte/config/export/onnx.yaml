@@ -7,14 +7,54 @@ defaults:
   - /datamodule: yaak/predict
   - _self_
 
-
-# device: cpu
 device: cuda
 dtype: torch.float16
-# dtype: torch.float32
-f: ${hydra:run.dir}/${model.artifact}.onnx
+
+job_name: onnx-smolvla-560000:v3-n10
+export_vision_separately: true
+
+dynamo_kwargs:
+  _recursive_: true
+  _convert_: all
+  strict: true
+
 artifacts_dir: ${hydra:run.dir}
 
-test:
-  # path: "outputs/2025-10-22/15-46-13/yaak/lerobot/policy_smolvla-seed_1000-dataset_yaak-ai_L2D-560000:v3.onnx"/
-  path: "outputs/2025-10-23/16-21-22/yaak/lerobot/policy_smolvla-seed_1000-dataset_yaak-ai_L2D-560000:v3.onnx"
+vision_kwargs:
+  _recursive_: true
+  _convert_: all
+  f: ${hydra:run.dir}/vision/siglip.onnx
+  artifacts_dir: ${hydra:run.dir}/vision
+
+shape_kwargs:
+  dynamic_shapes:
+    args:
+      _target_: builtins.tuple
+      _args_:
+        - - _target_: builtins.tuple
+            _args_:
+              - - _target_: torch.export.dynamic_shapes.Dim
+                  name: batch_size
+                  min: 1
+                  max: 6
+                - _target_: torch.export.dynamic_shapes.Dim.STATIC
+                - _target_: torch.export.dynamic_shapes.Dim.STATIC
+                - _target_: torch.export.dynamic_shapes.Dim.STATIC  
+
+lm_expert_kwargs:
+  _recursive_: true
+  _convert_: all
+  f: ${hydra:run.dir}/lm_expert/lm_expert.onnx
+  artifacts_dir: ${hydra:run.dir}/lm_expert
+
+onnx_kwargs:
+  _recursive_: true
+  _convert_: all
+  dynamo: true
+  external_data: false
+  optimize: true
+  verify: true
+  report: true
+  dump_exported_program: true
+  opset_version: 19
+  do_constant_folding: true

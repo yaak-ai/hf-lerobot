@@ -1,0 +1,7 @@
+models:
+  bfloat16:
+    _target_: polars.read_parquet
+    source: /nasa/team-space/artifacts/predictions/lerobot/bfloat16/policy_smolvla-seed_1000-dataset_yaak-ai_L2D-560000:v3/same_noise/results.parquet
+  float16:
+    _target_: polars.read_parquet
+    source: /nasa/team-space/artifacts/predictions/lerobot/float16/policy_smolvla-seed_1000-dataset_yaak-ai_L2D-560000:v3/same_noise/results.parquet

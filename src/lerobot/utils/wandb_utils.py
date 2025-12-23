@@ -169,3 +169,43 @@ class WandBLogger:
             raise ValueError(mode)
 
         self._wandb.log({f"{mode}/image_{log_image._caption}": log_image}, step=step)  # noqa: SLF001
+
+    def log_onnx(self, checkpoint_dir: Path) -> None:
+        """Checkpoints the policy to wandb."""
+        if self.cfg.disable_artifact:
+            return
+
+        step_id = checkpoint_dir.name
+        artifact_group = f"{self._group}-{step_id}"
+        if onnx_models := list(checkpoint_dir.glob("*.onnx")):
+            model = onnx_models[0]
+            artifact_name = f"{artifact_group}-onnx"
+            artifact_name = get_safe_wandb_artifact_name(artifact_name)
+            artifact = self._wandb.Artifact(artifact_name, type="model")
+            artifact.add_file(model)
+            self._wandb.log_artifact(artifact)
+        else:
+            logging.info(f"No ONNX model to log on: {checkpoint_dir}")  # noqa: G004, LOG015
+
+        if onnx_models := list(checkpoint_dir.glob("*.pt2")):
+            model = onnx_models[0]
+            artifact_name = f"{artifact_group}-dynamo"
+            artifact_name = get_safe_wandb_artifact_name(artifact_name)
+            artifact = self._wandb.Artifact(artifact_name, type="model")
+            artifact.add_file(model)
+            self._wandb.log_artifact(artifact)
+        else:
+            logging.info(f"No dynamo model to log on: {checkpoint_dir}")  # noqa: G004, LOG015
+
+        if onnx_models := list(checkpoint_dir.glob("*.md")):
+            model = onnx_models[0]
+            artifact_name = f"{artifact_group}-log"
+            artifact_name = get_safe_wandb_artifact_name(artifact_name)
+            artifact = self._wandb.Artifact(artifact_name, type="documentation")
+            artifact.add_file(model)
+            self._wandb.log_artifact(artifact)
+            with model.open("r") as f:
+                markdown_content = f.read()
+                self._wandb.run.summary["log_file"] = markdown_content
+        else:
+            logging.info(f"No export to log on: {checkpoint_dir}")  # noqa: G004, LOG015
