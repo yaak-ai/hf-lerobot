@@ -24,6 +24,9 @@ from transformers import (
     SmolVLMForConditionalGeneration,
 )
 
+from lerobot.policies.smolvla.modeling_smolvlm import ExportSmolVLMVisionEmbeddings, ExportSmolVLMVisionTransformer
+from lerobot.policies.utils import get_device_from_parameters
+
 
 def apply_rope(x, positions, max_wavelength=10_000):
     """
@@ -45,6 +48,7 @@ def apply_rope(x, positions, max_wavelength=10_000):
 
     x1, x2 = x.split(d_half, dim=-1)
     if torch.compiler.is_exporting():
+        # Avoid ScatterND errors
         return torch.cat([x1 * cos - x2 * sin, x2 * cos + x1 * sin], dim=-1).to(dtype)
     res = torch.empty_like(x)
     res[..., :d_half] = x1 * cos - x2 * sin
@@ -91,6 +95,19 @@ class SmolVLMWithExpertModel(nn.Module):
             self.get_vlm_model().text_model.layers = self.get_vlm_model().text_model.layers[:num_vlm_layers]
         self.num_vlm_layers = len(self.get_vlm_model().text_model.layers)
         self.config = config
+        if torch.compiler.is_exporting():
+            # replace SmolVLM components with export compatible versions
+            vision_tower = self.vlm.model.vision_model
+            device = get_device_from_parameters(vision_tower)
+            export_tower = ExportSmolVLMVisionTransformer(vision_tower.config)
+            export_tower.load_state_dict(vision_tower.state_dict())
+            export_tower = export_tower.to(device)
+            self.vlm.model.vision_model = export_tower
+            vision_embeddings = self.vlm.model.vision_model.embeddings
+            export_embeddings = ExportSmolVLMVisionEmbeddings(self.vlm.model.vision_model.config)
+            export_embeddings.load_state_dict(vision_embeddings.state_dict())
+            export_embeddings = export_embeddings.to(device)
+            self.vlm.model.vision_model.embeddings = export_embeddings
         # Smaller lm expert
         lm_expert_config = copy.deepcopy(config.text_config)
         hidden_size = lm_expert_config.hidden_size

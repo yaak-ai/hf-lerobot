@@ -264,6 +264,7 @@ def pad_vector(vector, new_dim):
     shape[-1] = new_dim
 
     if torch.compiler.is_exporting():
+        # Avoid ScatterND error when exporting
         padding = torch.zeros(
             *shape[:-1], new_dim - current_dim, dtype=vector.dtype, device=vector.device
         )
@@ -981,7 +982,7 @@ class VLAFlowMatching(nn.Module):
 
         return embs, pad_masks, att_masks
 
-    def embed_suffix(self, noisy_actions, timestep):
+    def embed_suffix(self, noisy_actions, timestep, compute_masks):
         """Embed state, noisy_actions, timestep to prepare for Expert Gemma processing."""
         embs = []
         pad_masks = []
@@ -1013,7 +1014,7 @@ class VLAFlowMatching(nn.Module):
         embs.append(action_time_emb)
         embs = torch.cat(embs, dim=1)
 
-        if torch.compiler.is_exporting():
+        if compute_masks:
             bsize, action_time_dim = action_time_emb.shape[:2]
             action_time_mask = torch.ones(bsize, action_time_dim, dtype=torch.bool, device=device)
             pad_masks.append(action_time_mask)
@@ -1042,7 +1043,7 @@ class VLAFlowMatching(nn.Module):
         prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(
             images, img_masks, lang_tokens, lang_masks, state=state
         )
-        suffix_embs, suffix_pad_masks, suffix_att_masks = self.embed_suffix(x_t, time)
+        suffix_embs, suffix_pad_masks, suffix_att_masks = self.embed_suffix(x_t, time, True)
 
         pad_masks = torch.cat([prefix_pad_masks, suffix_pad_masks], dim=1)
         att_masks = torch.cat([prefix_att_masks, suffix_att_masks], dim=1)
@@ -1059,7 +1060,7 @@ class VLAFlowMatching(nn.Module):
         )
         suffix_out = suffix_out[:, -self.config.chunk_size :]
         # Original openpi code, upcast attention output
-        if not torch.compiler.is_exporting():
+        if not torch.compiler.is_exporting() and self.action_out_proj.dtype != torch.float16:
             suffix_out = suffix_out.to(dtype=torch.float32)
         v_t = self.action_out_proj(suffix_out)
         losses = F.mse_loss(u_t, v_t, reduction="none")
@@ -1122,7 +1123,7 @@ class VLAFlowMatching(nn.Module):
         position_ids,
     ):
         """Apply one denoising step of the noise `x_t` at a given timestep."""
-        suffix_embs, _, _ = self.embed_suffix(x_t, timestep)
+        suffix_embs, _, _ = self.embed_suffix(x_t, timestep, False)
 
         outputs_embeds, _ = self.vlm_with_expert.forward(
             attention_mask=full_att_2d_masks,
@@ -1134,7 +1135,7 @@ class VLAFlowMatching(nn.Module):
         )
         suffix_out = outputs_embeds[1]
         suffix_out = suffix_out[:, -self.config.chunk_size :]
-        if not torch.compiler.is_exporting():
+        if not torch.compiler.is_exporting() and self.action_out_proj.weight.dtype != torch.float16:
             suffix_out = suffix_out.to(dtype=torch.float32)
         v_t = self.action_out_proj(suffix_out)
         return v_t
