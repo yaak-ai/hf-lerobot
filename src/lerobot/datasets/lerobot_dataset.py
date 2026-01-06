@@ -168,7 +168,7 @@ class LeRobotDatasetMetadata:
             self.episodes = load_episodes(self.root)
         else:
             self.tasks = load_tasks_v2(self.root)
-            self.episodes = load_episodes_v2(self.root)
+            self.episodes = load_episodes_v2(self.root, self.video_keys)
 
     def pull_from_repo(
         self,
