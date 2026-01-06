@@ -24,6 +24,7 @@ from pprint import pformat
 from typing import Any, Generic, TypeVar
 
 import datasets
+import jsonlines
 import numpy as np
 import packaging.version
 import pandas
@@ -31,6 +32,7 @@ import pandas as pd
 import pyarrow.dataset as pa_ds
 import pyarrow.parquet as pq
 import torch
+from itertools import accumulate
 from datasets import Dataset
 from datasets.table import embed_table_storage
 from huggingface_hub import DatasetCard, DatasetCardData, HfApi
@@ -54,11 +56,13 @@ DEFAULT_VIDEO_FILE_SIZE_IN_MB = 200  # Max size per file
 INFO_PATH = "meta/info.json"
 STATS_PATH = "meta/stats.json"
 
+EPISODES_V2_PATH = "meta/episodes.jsonl"
 EPISODES_DIR = "meta/episodes"
 DATA_DIR = "data"
 VIDEO_DIR = "videos"
 
 CHUNK_FILE_PATTERN = "chunk-{chunk_index:03d}/file-{file_index:03d}"
+V2_TASKS_PATH = "meta/tasks.jsonl"
 DEFAULT_TASKS_PATH = "meta/tasks.parquet"
 DEFAULT_EPISODES_PATH = EPISODES_DIR + "/" + CHUNK_FILE_PATTERN + ".parquet"
 DEFAULT_DATA_PATH = DATA_DIR + "/" + CHUNK_FILE_PATTERN + ".parquet"
@@ -352,6 +356,20 @@ def load_tasks(local_dir: Path) -> pandas.DataFrame:
     tasks = pd.read_parquet(local_dir / DEFAULT_TASKS_PATH)
     return tasks
 
+def load_tasks_v2(local_dir: Path) -> pandas.DataFrame:
+    tasks = load_jsonlines(local_dir / V2_TASKS_PATH)
+    tasks = {item["task_index"]: item["task"] for item in sorted(tasks, key=lambda x: x["task_index"])}
+
+    task_indices = tasks.keys()
+    task_strings = tasks.values()
+
+    return pd.DataFrame({"task_index": task_indices}, index=task_strings)
+
+def load_jsonlines(fpath: Path) -> list[Any]:
+    with jsonlines.open(fpath, "r") as reader:
+        return list(reader)
+
+
 
 def write_episodes(episodes: Dataset, local_dir: Path) -> None:
     """Write episode metadata to a parquet file in the LeRobot v3.0 format.
@@ -382,6 +400,41 @@ def load_episodes(local_dir: Path) -> datasets.Dataset:
     # This is to speedup access to these data, instead of having to load episode stats.
     episodes = episodes.select_columns([key for key in episodes.features if not key.startswith("stats/")])
     return episodes
+
+def load_episodes_v2(local_dir: Path, video_keys : list[str]) -> datasets.Dataset:
+    episodes = load_jsonlines(local_dir / EPISODES_V2_PATH)
+
+    episodes_metadata = {item["episode_index"]: item for item in sorted(episodes, key=lambda x: x["episode_index"])}
+
+    ds_episodes = Dataset.from_generator(
+        lambda: generate_episode_metadata_dict(
+            episodes_metadata, video_keys
+        )
+    )
+
+    return ds_episodes
+
+def generate_episode_metadata_dict(
+    episodes_metadata, video_keys: list[str]
+):
+    num_episodes = len(episodes_metadata)
+    episodes_metadata_vals = list(episodes_metadata.values())
+
+    num_frames = 0
+
+    for i in range(num_episodes):
+        ep_metadata = episodes_metadata_vals[i]
+
+        ep_dict = {**ep_metadata}
+        ep_dict["dataset_from_index"] = num_frames
+        ep_dict["dataset_to_index"] = num_frames + ep_metadata["length"]
+
+        for vid_key in video_keys:
+            ep_dict[f"videos/{vid_key}/from_timestamp"] = 0
+
+        num_frames = num_frames + ep_metadata["length"]
+
+        yield ep_dict      
 
 
 def load_image_as_numpy(

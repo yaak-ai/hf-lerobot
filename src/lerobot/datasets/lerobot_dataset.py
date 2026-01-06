@@ -54,10 +54,12 @@ from lerobot.datasets.utils import (
     hf_transform_to_torch,
     is_valid_version,
     load_episodes,
+    load_episodes_v2,
     load_info,
     load_nested_dataset,
     load_stats,
     load_tasks,
+    load_tasks_v2,
     update_chunk_file_indices,
     validate_episode_buffer,
     validate_frame,
@@ -159,10 +161,14 @@ class LeRobotDatasetMetadata:
 
     def load_metadata(self):
         self.info = load_info(self.root)
-        check_version_compatibility(self.repo_id, self._version, CODEBASE_VERSION)
-        self.tasks = load_tasks(self.root)
-        self.episodes = load_episodes(self.root)
+        check_version_compatibility(self.repo_id, self._version, "v2.0")
         self.stats = load_stats(self.root)
+        if self._version == CODEBASE_VERSION:
+            self.tasks = load_tasks(self.root)
+            self.episodes = load_episodes(self.root)
+        else:
+            self.tasks = load_tasks_v2(self.root)
+            self.episodes = load_episodes_v2(self.root)
 
     def pull_from_repo(
         self,
@@ -186,8 +192,20 @@ class LeRobotDatasetMetadata:
     def _version(self) -> packaging.version.Version:
         """Codebase version used to create this dataset."""
         return packaging.version.parse(self.info["codebase_version"])
-
+    
     def get_data_file_path(self, ep_index: int) -> Path:
+        if self._version == CODEBASE_VERSION:
+            return self.get_data_file_path_v3(ep_index)
+        
+        return self.get_data_file_path_v2(ep_index)
+    
+    def get_video_file_path(self, ep_index: int, vid_key: str) -> Path:
+        if self._version == CODEBASE_VERSION:
+            return self.get_video_file_path_v3(ep_index, vid_key)
+        
+        return self.get_video_file_path_v2(ep_index, vid_key)
+
+    def get_data_file_path_v3(self, ep_index: int) -> Path:
         if self.episodes is None:
             self.episodes = load_episodes(self.root)
         if ep_index >= len(self.episodes):
@@ -200,7 +218,7 @@ class LeRobotDatasetMetadata:
         fpath = self.data_path.format(chunk_index=chunk_idx, file_index=file_idx)
         return Path(fpath)
 
-    def get_video_file_path(self, ep_index: int, vid_key: str) -> Path:
+    def get_video_file_path_v3(self, ep_index: int, vid_key: str) -> Path:
         if self.episodes is None:
             self.episodes = load_episodes(self.root)
         if ep_index >= len(self.episodes):
@@ -212,6 +230,19 @@ class LeRobotDatasetMetadata:
         file_idx = ep[f"videos/{vid_key}/file_index"]
         fpath = self.video_path.format(video_key=vid_key, chunk_index=chunk_idx, file_index=file_idx)
         return Path(fpath)
+    
+    def get_data_file_path_v2(self, ep_index: int) -> Path:
+        ep_chunk = self.get_episode_chunk(ep_index)
+        fpath = self.data_path.format(episode_chunk=ep_chunk, episode_index=ep_index)
+        return Path(fpath)
+
+    def get_video_file_path_v2(self, ep_index: int, vid_key: str) -> Path:
+        ep_chunk = self.get_episode_chunk(ep_index)
+        fpath = self.video_path.format(episode_chunk=ep_chunk, video_key=vid_key, episode_index=ep_index)
+        return Path(fpath)
+    
+    def get_episode_chunk(self, ep_index: int) -> int:
+        return ep_index // self.chunks_size
 
     @property
     def data_path(self) -> str:
