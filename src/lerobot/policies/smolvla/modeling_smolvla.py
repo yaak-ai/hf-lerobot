@@ -602,138 +602,24 @@ class SmolVLAPolicy(PreTrainedPolicy):
     def prepare_language(self, batch) -> tuple[Tensor, Tensor]:
         """Tokenize the text input"""
         device = batch[OBS_STATE].device
+        tasks = batch["task"]
+        if isinstance(tasks, str):
+            tasks = [tasks]
 
-        lang_tokens = (
-            torch.Tensor([
-                [
-                    15423,
-                    260,
-                    970,
-                    6911,
-                    284,
-                    1574,
-                    5756,
-                    3547,
-                    28,
-                    1066,
-                    260,
-                    970,
-                    6911,
-                    979,
-                    22768,
-                    288,
-                    5442,
-                    3372,
-                    284,
-                    5930,
-                    198,
-                    2,
-                    2,
-                    2,
-                    2,
-                    2,
-                    2,
-                    2,
-                    2,
-                    2,
-                    2,
-                    2,
-                    2,
-                    2,
-                    2,
-                    2,
-                    2,
-                    2,
-                    2,
-                    2,
-                    2,
-                    2,
-                    2,
-                    2,
-                    2,
-                    2,
-                    2,
-                    2,
-                ]
-            ])
-            .to(device, dtype=torch.int64)
-            .repeat(batch[OBS_STATE].shape[0], 1)
+        if len(tasks) == 1:
+            tasks = [tasks[0] for _ in range(batch[OBS_STATE].shape[0])]
+
+        tasks = [task if task.endswith("\n") else f"{task}\n" for task in tasks]
+
+        tokenized_prompt = self.language_tokenizer.__call__(
+            tasks,
+            padding=self.config.pad_language_to,
+            padding_side="right",
+            max_length=self.config.tokenizer_max_length,
+            return_tensors="pt",
         )
-        lang_masks = (
-            torch.Tensor([
-                [
-                    True,
-                    True,
-                    True,
-                    True,
-                    True,
-                    True,
-                    True,
-                    True,
-                    True,
-                    True,
-                    True,
-                    True,
-                    True,
-                    True,
-                    True,
-                    True,
-                    True,
-                    True,
-                    True,
-                    True,
-                    True,
-                    False,
-                    False,
-                    False,
-                    False,
-                    False,
-                    False,
-                    False,
-                    False,
-                    False,
-                    False,
-                    False,
-                    False,
-                    False,
-                    False,
-                    False,
-                    False,
-                    False,
-                    False,
-                    False,
-                    False,
-                    False,
-                    False,
-                    False,
-                    False,
-                    False,
-                    False,
-                    False,
-                ]
-            ])
-            .to(device, dtype=torch.bool)
-            .repeat(batch[OBS_STATE].shape[0], 1)
-        )
-
-        # tasks = batch["task"]
-        # if isinstance(tasks, str):
-        #     tasks = [tasks]
-
-        # if len(tasks) == 1:
-        #     tasks = [tasks[0] for _ in range(batch[OBS_STATE].shape[0])]
-
-        # tasks = [task if task.endswith("\n") else f"{task}\n" for task in tasks]
-
-        # tokenized_prompt = self.language_tokenizer.__call__(
-        #     tasks,
-        #     padding=self.config.pad_language_to,
-        #     padding_side="right",
-        #     max_length=self.config.tokenizer_max_length,
-        #     return_tensors="pt",
-        # )
-        # lang_tokens = tokenized_prompt["input_ids"].to(device=device)
-        # lang_masks = tokenized_prompt["attention_mask"].to(device=device, dtype=torch.bool)
+        lang_tokens = tokenized_prompt["input_ids"].to(device=device)
+        lang_masks = tokenized_prompt["attention_mask"].to(device=device, dtype=torch.bool)
 
         return lang_tokens, lang_masks
 

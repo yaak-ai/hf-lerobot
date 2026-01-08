@@ -48,6 +48,37 @@ class ExportPolicy(torch.nn.Module):
     def forward(self, batch, noise):
         return self.policy.predict_action_chunk(batch, noise)
 
+
+class ExportEmbeddingModel(torch.nn.Module):
+    def __init__(self, policy, lang_tokens, lang_masks):
+        super().__init__()
+        self.policy = policy
+        self.policy.register_buffer("lang_tokens", lang_tokens)
+        self.policy.register_buffer("lang_masks", lang_masks)
+
+    def forward(self, batch: dict):
+        batch = self.policy._prepare_batch(batch)  # noqa: SLF001
+        images, img_masks = (
+            self.policy.prepare_images(batch)
+            if not self.policy.use_context
+            else self.policy.prepare_images_context(batch)
+        )
+        state = (
+            self.policy.prepare_state(batch)
+            if not self.policy.use_context
+            else self.policy.prepare_state_context(batch)
+        )
+        prefix_embs, prefix_pad_masks, prefix_att_masks = (
+            self.policy.model.embed_prefix(
+                images,
+                img_masks,
+                self.policy.lang_tokens,
+                self.policy.lang_masks,
+                state=state,
+            )
+        )
+        return prefix_embs, prefix_pad_masks, prefix_att_masks
+
     # def forward_vision(self, images):
     #     return self.policy.embed_image(images)
 
@@ -303,7 +334,12 @@ def dummy_input(device: torch.device, dtype: torch.dtype, bsize: int = 1) -> dic
 
 
 def episode_input(
-    cfg: DictConfig, device: torch.device, dtype: torch.dtype, normalize_image=False
+    cfg: DictConfig,
+    device: torch.device,
+    dtype: torch.dtype,
+    resize_in_episode_construction: bool,
+    width: int,
+    height: int,
 ) -> dict:
     dataloader_test: DataLoader = instantiate(cfg.datamodule)
     batch = __getbatch__(next(iter(dataloader_test)))
@@ -313,15 +349,15 @@ def episode_input(
                 batch[k] = v.to(dtype)
             batch[k] = batch[k].to(device)
     im_key = "observation.images.front_left"
-    batch[im_key] = resize_with_pad(
-        torch.reshape(batch[im_key], (-1, *batch[im_key].shape[-3:])),
-        512,
-        512,
-        pad_value=0,
-    ).reshape((*batch[im_key].shape[:-2], 512, 512))
-    if normalize_image:
-        batch[im_key] *= 2.0
-        batch[im_key] -= 1.0
+    if resize_in_episode_construction:
+        batch[im_key] = resize_with_pad(
+            torch.reshape(batch[im_key], (-1, *batch[im_key].shape[-3:])),
+            width,
+            height,
+            pad_value=0,
+        ).reshape((*batch[im_key].shape[:-2], width, height))
+        # batch[im_key] *= 2.0  # noqa: ERA001
+        # batch[im_key] -= 1.0  # noqa: ERA001
     _, noise, time = dummy_input(
         torch.device(cfg.device), dtype, bsize=batch[im_key].shape[0]
     )
@@ -377,13 +413,51 @@ def export_vision(policy_vla, args, dynamo_kwargs, onnx_kwargs, wandb_logger):
     wandb_logger.log_onnx(Path(onnx_kwargs["artifacts_dir"]))
 
 
+def export_embedding(policy_vla, args, dynamo_kwargs, onnx_kwargs, wandb_logger):
+    batch, lang_tokens, lang_masks = args
+    policy = ExportEmbeddingModel(policy_vla, lang_tokens, lang_masks)
+    # discard time and noise
+    # with torch.inference_mode(), pytest.MonkeyPatch.context() as m:  # noqa: SIM117
+    #     m.setattr("torch.compiler._is_exporting_flag", True)  # noqa: ERA001
+    #     result = policy(batch)  # noqa: ERA001
+
+    exported_program = torch.export.export(mod=policy, args=(batch,), **dynamo_kwargs)
+    _ = torch.onnx.export(
+        model=exported_program,
+        args=tuple(
+            args,
+        ),
+        **onnx_kwargs,
+    )
+    wandb_logger.log_onnx(Path(onnx_kwargs["artifacts_dir"]))
+    print(f"mkdir -p {Path(onnx_kwargs['f']).stem}")  # noqa: T201
+    print(f"cd {Path(onnx_kwargs['f']).stem}")  # noqa: T201
+    print(f"rsync -av valentina@berghain:{Path(onnx_kwargs['f']).resolve()} .")  # noqa: T201
+    print(f"rsync -av {Path(onnx_kwargs['f']).name} valentina@delta:/home/valentina")  # noqa: T201
+
+
+def patch_resizing(vision_kwargs, policy_vla):
+    width, height = (
+        policy_vla.config.resize_imgs_with_padding
+        if vision_kwargs["resize_imgs_with_padding"] is None
+        else vision_kwargs["resize_imgs_with_padding"]
+    )
+    policy_vla.config.resize_imgs_with_padding = vision_kwargs[
+        "resize_imgs_with_padding"
+    ]
+    vision_kwargs.pop("resize_imgs_with_padding")
+    # if policy_vla.config.resize_imgs_with_padding is None, images will not be resized
+    # in the forward method, so they need to be resized in episode construction
+    resize_in_episode_construction = policy_vla.config.resize_imgs_with_padding is None
+    return width, height, resize_in_episode_construction
+
+
 def export_dynamo(cfg: DictConfig) -> None:
     logging.debug("instantiating policy")  # noqa: LOG015
     dtype = torch.bfloat16
-
     # dtype = torch.float16 if cfg.dtype == "torch.float16" else torch.float32
     policy_vla, policy_cfg, _ = prepare_model_data(cfg, dtype)
-    policy_vla.normalize_inputs
+
     policy_cfg.job_name = cfg.job_name
     policy_cfg.output_dir = cfg.artifacts_dir
     wandb_logger = WandBLogger(policy_cfg)
@@ -396,7 +470,6 @@ def export_dynamo(cfg: DictConfig) -> None:
 
     # temporary hack
     # policy_vla.config.num_steps = 1  # noqa: ERA001
-    policy_vla.config.resize_imgs_with_padding = None
 
     policy: ExportPolicy = ExportPolicy(policy_vla)
     # policy = torch.compile(policy)  # noqa: ERA001
@@ -413,12 +486,24 @@ def export_dynamo(cfg: DictConfig) -> None:
     # LLM obs
     # args = dummy_obs(torch.device(cfg.device), dtype, bsize=1)  # noqa: ERA001
 
-    args = episode_input(
+    # monkey patch resizing
+    width, height, resize_in_episode_construction = patch_resizing(
+        vision_kwargs, policy_vla
+    )
+    batch, noise, _ = episode_input(
         cfg,
         torch.device(cfg.device),
         dtype,
-        isinstance(policy.policy, SmolVLMVisionTransformer),
-    )[:-1]
+        resize_in_episode_construction,
+        width,
+        height,
+    )
+    # keep the tokenization outside the ONNX model since it produces errors
+    # also keep it outside of episode construction sinde it is model-dependent
+    lang_tokens, lang_masks = policy_vla.prepare_language(batch)
+    # after tokenization, task text is no longer needed in the batch
+    batch.pop("task")
+    args_embedding = (batch, lang_tokens, lang_masks)
 
     # SigLip args only (policy.model.vlm_with_expert.vlm.model.vision_model)
     # args = args[0]["observation.images.front_left"][:1, :, ...]  # noqa: ERA001
@@ -430,6 +515,14 @@ def export_dynamo(cfg: DictConfig) -> None:
     # args = list(args)  # noqa: ERA001
     # args.append(None)  # noqa: ERA001
 
+    export_embedding(
+        policy_vla,
+        args_embedding,
+        dynamo_kwargs,
+        {**onnx_kwargs, **vision_kwargs},
+        wandb_logger,
+    )
+    exit(0)
     export_vision(
         policy_vla,
         args,
