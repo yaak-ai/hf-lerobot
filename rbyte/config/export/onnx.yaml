@@ -27,20 +27,25 @@ vision_kwargs:
   artifacts_dir: ${hydra:run.dir}/vision
 
 shape_kwargs:
+  _recursive_: true
+  _convert_: all
+  strict: true
   dynamic_shapes:
-    args:
-      _target_: builtins.tuple
-      _args_:
-        - - _target_: builtins.tuple
-            _args_:
-              - - _target_: torch.export.dynamic_shapes.Dim
-                  name: batch_size
-                  min: 1
-                  max: 6
-                - _target_: torch.export.dynamic_shapes.Dim.STATIC
-                - _target_: torch.export.dynamic_shapes.Dim.STATIC
-                - _target_: torch.export.dynamic_shapes.Dim.STATIC  
-
+    images:
+      - _target_: torch.export.dynamic_shapes.Dim
+        name: batch_size
+        min: 1
+        max: 6
+      - _target_: torch.export.dynamic_shapes.Dim.STATIC
+      - _target_: torch.export.dynamic_shapes.Dim.STATIC
+      - _target_: torch.export.dynamic_shapes.Dim.STATIC
+    patch_attention_mask:
+      - _target_: torch.export.dynamic_shapes.Dim
+        name: batch_size
+        min: 1
+        max: 6
+      - _target_: torch.export.dynamic_shapes.Dim.STATIC
+      - _target_: torch.export.dynamic_shapes.Dim.STATIC 
 lm_expert_kwargs:
   _recursive_: true
   _convert_: all
@@ -58,3 +63,19 @@ onnx_kwargs:
   dump_exported_program: true
   opset_version: 19
   do_constant_folding: true
+  dynamic_shapes:
+    images:
+      - _target_: torch.export.dynamic_shapes.Dim
+        name: batch_size
+        min: 1
+        max: 6
+      - _target_: torch.export.dynamic_shapes.Dim.STATIC
+      - _target_: torch.export.dynamic_shapes.Dim.STATIC
+      - _target_: torch.export.dynamic_shapes.Dim.STATIC
+    patch_attention_mask:
+      - _target_: torch.export.dynamic_shapes.Dim
+        name: batch_size
+        min: 1
+        max: 6
+      - _target_: torch.export.dynamic_shapes.Dim.STATIC
+      - _target_: torch.export.dynamic_shapes.Dim.STATIC 

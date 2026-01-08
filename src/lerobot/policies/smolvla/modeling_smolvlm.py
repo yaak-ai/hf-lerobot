@@ -17,7 +17,7 @@ class ExportSmolVLMVisionEmbeddings(SmolVLMVisionEmbeddings):
         if torch.compiler.is_exporting():
             # patch dependent on the image size, circumvents the
             # data-dependent control flow
-            position_ids = torch.arange(0, 1024, dtype=torch.int64)
+            position_ids = torch.arange(0, 1024, dtype=torch.int64).unsqueeze(0).repeat(pixel_values.shape[0], 1)
         else:
             batch_size, _, max_im_h, max_im_w = pixel_values.shape
             max_nb_patches_h, max_nb_patches_w = max_im_h // self.patch_size, max_im_w // self.patch_size

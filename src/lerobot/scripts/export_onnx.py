@@ -338,7 +338,7 @@ def main(cfg: DictConfig) -> None:
 
 def prepare_model_data(cfg: DictConfig, dtype: torch.dtype) -> None:
     logging.debug("instantiating policy")  # noqa: LOG015
-    with torch.inference_mode(), pytest.MonkeyPatch.context() as m: 
+    with torch.inference_mode(), pytest.MonkeyPatch.context() as m:
         m.setattr("torch.compiler._is_exporting_flag", True)
         policy, train_cfg = instantiate(cfg.model)
 
@@ -365,26 +365,25 @@ def export_vision(policy_vla, args, dynamo_kwargs, onnx_kwargs, wandb_logger):
     ))
     args = (
         images,
-        # torch.ones((images.shape[0], 32, 32), dtype=torch.bool, device=images.device),
+        torch.ones((images.shape[0], 32, 32), dtype=torch.bool, device=images.device),
     )
 
     # with torch.inference_mode(), pytest.MonkeyPatch.context() as m:  # noqa: SIM117
     #     m.setattr("torch.compiler._is_exporting_flag", True)  # noqa: ERA001
     #     result = policy(*args)  # noqa: ERA001
 
-
-    exported_program = torch.export.export(mod=policy, args=(images,), **dynamo_kwargs)
-    # _ = torch.onnx.export(model=exported_program, args=tuple(args), **onnx_kwargs)
-    # wandb_logger.log_onnx(Path(onnx_kwargs["artifacts_dir"]))
-    exit(0)
+    exported_program = torch.export.export(mod=policy, args=(args), **dynamo_kwargs)
+    _ = torch.onnx.export(model=exported_program, args=tuple(args), **onnx_kwargs)
+    wandb_logger.log_onnx(Path(onnx_kwargs["artifacts_dir"]))
 
 
 def export_dynamo(cfg: DictConfig) -> None:
     logging.debug("instantiating policy")  # noqa: LOG015
     dtype = torch.bfloat16
+
     # dtype = torch.float16 if cfg.dtype == "torch.float16" else torch.float32
     policy_vla, policy_cfg, _ = prepare_model_data(cfg, dtype)
-
+    policy_vla.normalize_inputs
     policy_cfg.job_name = cfg.job_name
     policy_cfg.output_dir = cfg.artifacts_dir
     wandb_logger = WandBLogger(policy_cfg)
@@ -392,8 +391,8 @@ def export_dynamo(cfg: DictConfig) -> None:
     dynamo_kwargs = instantiate(cfg.dynamo_kwargs)
     onnx_kwargs = instantiate(cfg.onnx_kwargs)
     vision_kwargs = instantiate(cfg.vision_kwargs)
-    shape_kwargs = instantiate(cfg.shape_kwargs)
     lm_expert_kwargs = instantiate(cfg.lm_expert_kwargs)
+    shape_kwargs = instantiate(cfg.shape_kwargs)
 
     # temporary hack
     # policy_vla.config.num_steps = 1  # noqa: ERA001
@@ -432,12 +431,17 @@ def export_dynamo(cfg: DictConfig) -> None:
     # args.append(None)  # noqa: ERA001
 
     export_vision(
-        policy_vla, args, {**dynamo_kwargs, **shape_kwargs}, {**onnx_kwargs, **vision_kwargs}, wandb_logger
+        policy_vla,
+        args,
+        # dynamo_kwargs,
+        {**dynamo_kwargs, **shape_kwargs},
+        {**onnx_kwargs, **vision_kwargs},
+        wandb_logger,
     )
 
-    with torch.inference_mode(), pytest.MonkeyPatch.context() as m:  # noqa: SIM117
-        m.setattr("torch.compiler._is_exporting_flag", True)  # noqa: ERA001
-        result = policy(*args)  # noqa: ERA001
+    # with torch.inference_mode(), pytest.MonkeyPatch.context() as m:  # noqa: SIM117
+    #     m.setattr("torch.compiler._is_exporting_flag", True)  # noqa: ERA001
+    #     result = policy(*args)  # noqa: ERA001
     logging.info("torch exporting")  # noqa: LOG015
 
     exported_program = torch.export.export(mod=policy, args=(args), **dynamo_kwargs)
