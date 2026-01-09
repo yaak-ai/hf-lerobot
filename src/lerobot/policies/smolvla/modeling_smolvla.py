@@ -577,7 +577,8 @@ class SmolVLAPolicy(PreTrainedPolicy):
                 img = resize_with_pad(img, *self.config.resize_imgs_with_padding, pad_value=0)
 
             # Normalize from range [0,1] to [-1,1] as expacted by siglip
-            img = img * 2.0 - 1.0
+            if not torch.compiler.is_exporting():
+                img = img * 2.0 - 1.0
 
             bsize = img.shape[0]
             device = img.device
@@ -830,15 +831,19 @@ class VLAFlowMatching(nn.Module):
         # att_masks += [0] * (num_img_embs) if not self.use_context else [1] + [0] * (num_img_embs - 1)
         att_masks = [0] * (num_img_embs * len(images))
 
-        lang_emb = self.vlm_with_expert.embed_language_tokens(lang_tokens)
-        # Normalize language embeddings
-        lang_emb_dim = lang_emb.shape[-1]
-        lang_emb *= math.sqrt(lang_emb_dim)
+        if torch.compiler.is_exporting():
+            # lang_tokens are already embedded and normalized
+            embs.append(lang_tokens)
+        else:
+            lang_emb = self.vlm_with_expert.embed_language_tokens(lang_tokens)
+            # Normalize language embeddings
+            lang_emb_dim = lang_emb.shape[-1]
+            lang_emb *= math.sqrt(lang_emb_dim)
 
-        embs.append(lang_emb)
+            embs.append(lang_emb)
         pad_masks.append(lang_masks)
 
-        num_lang_embs = lang_emb.shape[1]
+        num_lang_embs = embs[-1].shape[1]
         att_masks += [0] * num_lang_embs
 
         state_emb = self.state_proj(state) if not self.use_separate_intent else torch.cat([self.intent_proj(state[0]), self.state_proj(state[1])], axis=1)

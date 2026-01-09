@@ -23,12 +23,12 @@ artifacts_dir: ${hydra:run.dir}
 vision_kwargs:
   _recursive_: true
   _convert_: all
-  f: ${hydra:run.dir}/vision/embedding_resize.onnx
+  f: ${hydra:run.dir}/vision/embedding_static.onnx
   artifacts_dir: ${hydra:run.dir}/vision
-  # resize_imgs_with_padding: null
-  resize_imgs_with_padding:
-    - 512
-    - 512
+  resize_imgs_with_padding: null
+  # resize_imgs_with_padding:
+  #   - 512
+  #   - 512
 
 shape_kwargs:
   _recursive_: true

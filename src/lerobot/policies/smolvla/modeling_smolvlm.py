@@ -10,7 +10,7 @@ from transformers.models.smolvlm.modeling_smolvlm import (
 
 class ExportSmolVLMVisionEmbeddings(SmolVLMVisionEmbeddings):
 
-    def forward(self, pixel_values: torch.FloatTensor, patch_attention_mask: torch.BoolTensor) -> torch.Tensor:
+    def forward(self, pixel_values: torch.FloatTensor, patch_attention_mask: Optional[torch.BoolTensor] = None) -> torch.Tensor:
         patch_embeds = self.patch_embedding(pixel_values)
         embeddings = patch_embeds.flatten(2).transpose(1, 2)
 
@@ -58,18 +58,22 @@ class ExportSmolVLMVisionTransformer(SmolVLMVisionTransformer):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
         batch_size = pixel_values.size(0)
-        if patch_attention_mask is None:
-            patch_size = self.patch_size
-            patch_attention_mask = torch.ones(
-                (
-                    batch_size,
-                    pixel_values.size(2) // patch_size,
-                    pixel_values.size(3) // patch_size,
-                )
-            )
-            patch_attention_mask = patch_attention_mask.to(dtype=torch.bool, device=pixel_values.device)
 
-        hidden_states = self.embeddings(pixel_values=pixel_values, patch_attention_mask=patch_attention_mask)
+        if torch.compiler.is_exporting():
+            hidden_states = self.embeddings(pixel_values=pixel_values)
+        else:
+            if patch_attention_mask is None:
+                patch_size = self.patch_size
+                patch_attention_mask = torch.ones(
+                    (
+                        batch_size,
+                        pixel_values.size(2) // patch_size,
+                        pixel_values.size(3) // patch_size,
+                    )
+                )
+                patch_attention_mask = patch_attention_mask.to(dtype=torch.bool, device=pixel_values.device)
+
+            hidden_states = self.embeddings(pixel_values=pixel_values, patch_attention_mask=patch_attention_mask)
 
         # remove data dependent control flow from transformers
         if torch.compiler.is_exporting():

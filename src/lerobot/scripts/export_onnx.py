@@ -1,10 +1,9 @@
 import logging
-from copy import deepcopy
+import math
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import hydra
-import onnxruntime as ort
 import pytest
 import torch
 from hydra.utils import instantiate
@@ -50,10 +49,10 @@ class ExportPolicy(torch.nn.Module):
 
 
 class ExportEmbeddingModel(torch.nn.Module):
-    def __init__(self, policy, lang_tokens, lang_masks):
+    def __init__(self, policy, lang_emb, lang_masks):
         super().__init__()
         self.policy = policy
-        self.policy.register_buffer("lang_tokens", lang_tokens)
+        self.policy.register_buffer("lang_emb", lang_emb)
         self.policy.register_buffer("lang_masks", lang_masks)
 
     def forward(self, batch: dict):
@@ -72,7 +71,7 @@ class ExportEmbeddingModel(torch.nn.Module):
             self.policy.model.embed_prefix(
                 images,
                 img_masks,
-                self.policy.lang_tokens,
+                self.policy.lang_emb,
                 self.policy.lang_masks,
                 state=state,
             )
@@ -356,8 +355,8 @@ def episode_input(
             height,
             pad_value=0,
         ).reshape((*batch[im_key].shape[:-2], width, height))
-        # batch[im_key] *= 2.0  # noqa: ERA001
-        # batch[im_key] -= 1.0  # noqa: ERA001
+        batch[im_key] *= 2.0
+        batch[im_key] -= 1.0
     _, noise, time = dummy_input(
         torch.device(cfg.device), dtype, bsize=batch[im_key].shape[0]
     )
@@ -414,9 +413,8 @@ def export_vision(policy_vla, args, dynamo_kwargs, onnx_kwargs, wandb_logger):
 
 
 def export_embedding(policy_vla, args, dynamo_kwargs, onnx_kwargs, wandb_logger):
-    batch, lang_tokens, lang_masks = args
-    policy = ExportEmbeddingModel(policy_vla, lang_tokens, lang_masks)
-    # discard time and noise
+    batch, lang_emb, lang_masks = args
+    policy = ExportEmbeddingModel(policy_vla, lang_emb, lang_masks)
     # with torch.inference_mode(), pytest.MonkeyPatch.context() as m:  # noqa: SIM117
     #     m.setattr("torch.compiler._is_exporting_flag", True)  # noqa: ERA001
     #     result = policy(batch)  # noqa: ERA001
@@ -424,9 +422,7 @@ def export_embedding(policy_vla, args, dynamo_kwargs, onnx_kwargs, wandb_logger)
     exported_program = torch.export.export(mod=policy, args=(batch,), **dynamo_kwargs)
     _ = torch.onnx.export(
         model=exported_program,
-        args=tuple(
-            args,
-        ),
+        args=(batch,),
         **onnx_kwargs,
     )
     wandb_logger.log_onnx(Path(onnx_kwargs["artifacts_dir"]))
@@ -501,9 +497,13 @@ def export_dynamo(cfg: DictConfig) -> None:
     # keep the tokenization outside the ONNX model since it produces errors
     # also keep it outside of episode construction sinde it is model-dependent
     lang_tokens, lang_masks = policy_vla.prepare_language(batch)
+    lang_emb = policy_vla.model.vlm_with_expert.embed_language_tokens(lang_tokens)
+    # Normalize language embeddings
+    lang_emb_dim = lang_emb.shape[-1]
+    lang_emb *= math.sqrt(lang_emb_dim)
     # after tokenization, task text is no longer needed in the batch
     batch.pop("task")
-    args_embedding = (batch, lang_tokens, lang_masks)
+    args_embedding = (batch, lang_emb, lang_masks)
 
     # SigLip args only (policy.model.vlm_with_expert.vlm.model.vision_model)
     # args = args[0]["observation.images.front_left"][:1, :, ...]  # noqa: ERA001
