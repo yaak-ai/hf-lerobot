@@ -415,11 +415,12 @@ def export_vision(policy_vla, args, dynamo_kwargs, onnx_kwargs, wandb_logger):
 def export_embedding(policy_vla, args, dynamo_kwargs, onnx_kwargs, wandb_logger):
     batch, lang_emb, lang_masks = args
     policy = ExportEmbeddingModel(policy_vla, lang_emb, lang_masks)
-    # with torch.inference_mode(), pytest.MonkeyPatch.context() as m:  # noqa: SIM117
-    #     m.setattr("torch.compiler._is_exporting_flag", True)  # noqa: ERA001
-    #     result = policy(batch)  # noqa: ERA001
+    with torch.inference_mode(), pytest.MonkeyPatch.context() as m:  # noqa: SIM117
+        m.setattr("torch.compiler._is_exporting_flag", True)  # noqa: ERA001
+        result = policy(batch)  # noqa: ERA001
 
     exported_program = torch.export.export(mod=policy, args=(batch,), **dynamo_kwargs)
+    exit(0)
     _ = torch.onnx.export(
         model=exported_program,
         args=(batch,),
@@ -519,6 +520,7 @@ def export_dynamo(cfg: DictConfig) -> None:
         policy_vla,
         args_embedding,
         dynamo_kwargs,
+        # {**dynamo_kwargs, **shape_kwargs},
         {**onnx_kwargs, **vision_kwargs},
         wandb_logger,
     )

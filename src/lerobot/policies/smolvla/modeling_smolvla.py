@@ -534,7 +534,8 @@ class SmolVLAPolicy(PreTrainedPolicy):
                     img = resize_with_pad(img, *self.config.resize_imgs_with_padding, pad_value=0)
 
                 # Normalize from range [0,1] to [-1,1] as expacted by siglip
-                img = img * 2.0 - 1.0
+                if not torch.compiler.is_exporting():
+                    img = img * 2.0 - 1.0
 
                 bsize = img.shape[0]
                 device = img.device
@@ -577,8 +578,7 @@ class SmolVLAPolicy(PreTrainedPolicy):
                 img = resize_with_pad(img, *self.config.resize_imgs_with_padding, pad_value=0)
 
             # Normalize from range [0,1] to [-1,1] as expacted by siglip
-            if not torch.compiler.is_exporting():
-                img = img * 2.0 - 1.0
+            img = img * 2.0 - 1.0
 
             bsize = img.shape[0]
             device = img.device
