@@ -530,8 +530,7 @@ class SmolVLAPolicy(PreTrainedPolicy):
                     img = resize_with_pad(img, *self.config.resize_imgs_with_padding, pad_value=0)
 
                 # Normalize from range [0,1] to [-1,1] as expacted by siglip
-                if not torch.compiler.is_exporting():
-                    img = img * 2.0 - 1.0
+                img = img * 2.0 - 1.0
 
                 bsize = img.shape[0]
                 device = img.device
@@ -813,15 +812,15 @@ class VLAFlowMatching(nn.Module):
         embs = []
         pad_masks = []
         att_masks = []
-        img_emb = self.vlm_with_expert.embed_image(torch.cat(images))
+        img_emb = self.vlm_with_expert.embed_image(images)
         img_emb_dim = img_emb.shape[-1]
         if self.use_image_norm == 1:
             # Default behaviour
             img_emb *= torch.tensor(img_emb_dim**0.5, dtype=img_emb.dtype, device=img_emb.device)
         elif self.use_image_norm == 2:
             img_emb = torch.nn.functional.normalize(img_emb, p=2, dim=-1)
-        bsize, num_img_embs = images[0].shape[0], img_emb.shape[1]
-        pad_img = torch.stack(img_masks).T[..., None].expand(bsize, len(img_masks), num_img_embs)
+        bsize, num_img_embs = img_masks.shape[0], img_emb.shape[1]
+        pad_img = img_masks.expand(*img_masks.shape[:-1], num_img_embs)
         embs.extend(torch.split(img_emb, bsize))
         pad_masks.append(pad_img.reshape(bsize, -1))
         # att_masks += [0] * (num_img_embs) if not self.use_context else [1] + [0] * (num_img_embs - 1)

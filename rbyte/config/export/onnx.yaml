@@ -23,25 +23,34 @@ shape_kwargs:
   dynamic_shapes:
     batch:
       observation.images.front_left:
-        - _target_: torch.export.dynamic_shapes.Dim.STATIC
         - _target_: torch.export.dynamic_shapes.Dim
           name: batch_size
+          min: 1
+          max: 32
+        - _target_: torch.export.dynamic_shapes.Dim
+          name: obs_history
           min: 1
           max: 6
         - _target_: torch.export.dynamic_shapes.Dim.STATIC
         - _target_: torch.export.dynamic_shapes.Dim.STATIC
         - _target_: torch.export.dynamic_shapes.Dim.STATIC
       observation.state.vehicle:
-        - _target_: torch.export.dynamic_shapes.Dim.STATIC
         - _target_: torch.export.dynamic_shapes.Dim
           name: batch_size
+          min: 1
+          max: 32
+        - _target_: torch.export.dynamic_shapes.Dim
+          name: obs_history
           min: 1
           max: 6
         - _target_: torch.export.dynamic_shapes.Dim.STATIC
       observation.state.waypoints:
-        - _target_: torch.export.dynamic_shapes.Dim.STATIC
         - _target_: torch.export.dynamic_shapes.Dim
           name: batch_size
+          min: 1
+          max: 32
+        - _target_: torch.export.dynamic_shapes.Dim
+          name: obs_history
           min: 1
           max: 6
         - _target_: torch.export.dynamic_shapes.Dim.STATIC

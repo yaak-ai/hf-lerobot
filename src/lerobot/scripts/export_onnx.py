@@ -10,6 +10,7 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig
 
 from lerobot.configs.train import TrainPipelineConfig
+from lerobot.constants_yaak import ACTION, OBS_IMAGE
 from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.policies.smolvla.conversion_utils_yaak import __getbatch__
 from lerobot.policies.smolvla.modeling_smolvla import resize_with_pad
@@ -58,10 +59,13 @@ class ExportEmbeddingModel(torch.nn.Module):
 
     def forward(self, batch: dict):
         batch = self.policy._prepare_batch(batch)  # noqa: SLF001
+        bsize, seq_len = batch[OBS_IMAGE].shape[:2]
+        device = batch[OBS_IMAGE].device
         images, img_masks = (
-            self.policy.prepare_images(batch)
-            if not self.policy.use_context
-            else self.policy.prepare_images_context(batch)
+            batch[OBS_IMAGE].reshape(-1, *batch[OBS_IMAGE].shape[2:]),  # B*L, C, W, H
+            torch.ones(
+                (bsize, seq_len, 1), dtype=torch.bool, device=device
+            ),  # B, L, 1
         )
         state = (
             self.policy.prepare_state(batch)
@@ -93,7 +97,7 @@ def build_episode(
                 batch[k] = v.to(dtype)
             batch[k] = batch[k].to(device)
     batch.pop("meta/ImageMetadata.cam_front_left/time_stamp", None)
-    batch.pop("action.continuous", None)
+    batch.pop(ACTION, None)
     return batch
 
 
@@ -109,21 +113,20 @@ def update_episode_for_policy(
     2. Update policy config based on embedding_kwargs
     """  # noqa: DOC201
     # Images
-    im_key = "observation.images.front_left"
     if embedding_kwargs["resize_in_episode_construction"]:
-        batch[im_key] = resize_with_pad(
-            torch.reshape(batch[im_key], (-1, *batch[im_key].shape[-3:])),
+        batch[OBS_IMAGE] = resize_with_pad(
+            torch.reshape(batch[OBS_IMAGE], (-1, *batch[OBS_IMAGE].shape[-3:])),
             *policy_vla.config.resize_imgs_with_padding,
             pad_value=0,
         ).reshape((
-            *batch[im_key].shape[:-2],
+            *batch[OBS_IMAGE].shape[:-2],
             *policy_vla.config.resize_imgs_with_padding,
         ))
         # Do not resize in model, it's resized here
         policy_vla.config.resize_imgs_with_padding = None
         # Siglip normalization
-        batch[im_key] *= 2.0
-        batch[im_key] -= 1.0
+        batch[OBS_IMAGE] *= 2.0
+        batch[OBS_IMAGE] -= 1.0
     # Remove resize_in_episode_construction because it's not supported by torch.export
     embedding_kwargs.pop("resize_in_episode_construction")
 
@@ -139,7 +142,7 @@ def update_episode_for_policy(
     batch.pop("task")
 
     # Noise
-    bsize = batch[im_key].shape[0]
+    bsize = batch[OBS_IMAGE].shape[0]
     noise = torch.normal(
         mean=0.0,
         std=1.0,
@@ -165,7 +168,13 @@ def export_action(policy_vla, args, dynamo_kwargs, onnx_kwargs):
     pass
 
 
-def export_embedding(policy_vla, args, dynamo_kwargs, onnx_kwargs, wandb_logger):
+def export_embedding(
+    policy_vla: PreTrainedPolicy,
+    args: tuple,
+    dynamo_kwargs,
+    onnx_kwargs,
+    wandb_logger: WandBLogger,
+):
     batch, lang_emb, lang_masks = args
     policy = ExportEmbeddingModel(policy_vla, lang_emb, lang_masks)
     policy.eval()
@@ -218,8 +227,8 @@ def export_dynamo(cfg: DictConfig) -> None:
     export_embedding(
         policy_vla,
         args_embedding,
-        # dynamo_kwargs,
-        {**dynamo_kwargs, **shape_kwargs},
+        dynamo_kwargs,
+        # {**dynamo_kwargs, **shape_kwargs},
         {**onnx_kwargs, **embedding_kwargs},
         wandb_logger,
     )
