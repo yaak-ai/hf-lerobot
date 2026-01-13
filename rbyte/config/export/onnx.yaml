@@ -13,22 +13,8 @@ dtype: torch.float16
 job_name: onnx-smolvla-560000:v3-n10
 export_vision_separately: true
 
-dynamo_kwargs:
-  _recursive_: true
-  _convert_: all
-  strict: true
-
 artifacts_dir: ${hydra:run.dir}
 
-vision_kwargs:
-  _recursive_: true
-  _convert_: all
-  f: ${hydra:run.dir}/vision/embedding_dynamic.onnx
-  artifacts_dir: ${hydra:run.dir}/vision
-  resize_imgs_with_padding: null
-  # resize_imgs_with_padding:
-  #   - 512
-  #   - 512
 
 shape_kwargs:
   _recursive_: true
@@ -59,11 +45,27 @@ shape_kwargs:
           min: 1
           max: 6
         - _target_: torch.export.dynamic_shapes.Dim.STATIC
+
+
+embedding_kwargs:
+  _recursive_: true
+  _convert_: all
+  f: ${hydra:run.dir}/vision/embedding_dynamic.onnx
+  artifacts_dir: ${hydra:run.dir}/vision
+  resize_in_episode_construction: True
+  dynamic_shapes: ${shape_kwargs}
+
 lm_expert_kwargs:
   _recursive_: true
   _convert_: all
   f: ${hydra:run.dir}/lm_expert/lm_expert.onnx
   artifacts_dir: ${hydra:run.dir}/lm_expert
+
+dynamo_kwargs:
+  _recursive_: true
+  _convert_: all
+  strict: true
+
 
 onnx_kwargs:
   _recursive_: true
