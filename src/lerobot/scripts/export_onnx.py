@@ -218,6 +218,7 @@ def export_action_model(
 ) -> tuple:
     # Overwrite the number of denoising steps
     policy_vla.config.num_steps = onnx_kwargs["num_steps"]
+    onnx_kwargs.pop("num_steps")
     policy = ExportActionModel(policy_vla)
     policy.eval()
     # with torch.inference_mode(), pytest.MonkeyPatch.context() as m:  # noqa: SIM117

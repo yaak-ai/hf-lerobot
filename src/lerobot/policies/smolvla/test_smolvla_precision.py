@@ -18,8 +18,10 @@ def compute_l1(actions, gt_actions, short_names):
         ae_all = np.abs(actions[:, act_ind] - gt_actions[:, act_ind])
         ae = np.abs(actions[cond, act_ind] - gt_actions[cond, act_ind])
         logging.info(  # noqa: LOG015
-            f"{short_names[act_ind]} MSE: {np.mean(ae):.3f} median {np.median(ae):.3f}, std: {np.std(ae):.3f}, nr_samples: {len(ae)} , {sum(cond)}",  # noqa: E501, G004
-            f"MSE all: {np.mean(ae_all):.3f} median {np.median(ae_all):.3f}, std: {np.std(ae_all):.3f}, nr_samples: {len(ae_all)}",  # noqa: E501
+            f"{short_names[act_ind]} MSE: {np.mean(ae):.3f} median {np.median(ae):.3f}, std: {np.std(ae):.3f}, nr_samples: {len(ae)} , {sum(cond)}"  # noqa: G004
+        )
+        logging.info(  # noqa: LOG015
+            f"{short_names[act_ind]} MSE all: {np.mean(ae_all):.3f} median {np.median(ae_all):.3f}, std: {np.std(ae_all):.3f}, nr_samples: {len(ae_all)}"  # noqa: G004
         )
         l1_stats[short_names[act_ind]] = {
             "mean": np.mean(ae),

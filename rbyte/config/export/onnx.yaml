@@ -67,9 +67,9 @@ embedding_kwargs:
 action_kwargs:
   _recursive_: true
   _convert_: all
-  f: ${hydra:run.dir}/action/action.onnx
+  f: ${hydra:run.dir}/action/action3.onnx
   artifacts_dir: ${hydra:run.dir}/action
-  num_steps: 10
+  num_steps: 3
 
 dynamo_kwargs:
   _recursive_: true
