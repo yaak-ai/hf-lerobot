@@ -181,10 +181,6 @@ def prepare_model_data(cfg: DictConfig, dtype: torch.dtype) -> None:
     return policy, train_cfg
 
 
-def export_action(policy_vla, args, dynamo_kwargs, onnx_kwargs):
-    pass
-
-
 def export_embedding_model(
     policy_vla: PreTrainedPolicy,
     args: tuple,
@@ -220,6 +216,8 @@ def export_action_model(
     onnx_kwargs,
     wandb_logger: WandBLogger,
 ) -> tuple:
+    # Overwrite the number of denoising steps
+    policy_vla.config.num_steps = onnx_kwargs["num_steps"]
     policy = ExportActionModel(policy_vla)
     policy.eval()
     # with torch.inference_mode(), pytest.MonkeyPatch.context() as m:  # noqa: SIM117

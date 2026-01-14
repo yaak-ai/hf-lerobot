@@ -69,6 +69,7 @@ action_kwargs:
   _convert_: all
   f: ${hydra:run.dir}/action/action.onnx
   artifacts_dir: ${hydra:run.dir}/action
+  num_steps: 10
 
 dynamo_kwargs:
   _recursive_: true
