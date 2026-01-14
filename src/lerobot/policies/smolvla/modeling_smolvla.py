@@ -812,7 +812,7 @@ class VLAFlowMatching(nn.Module):
         embs = []
         pad_masks = []
         att_masks = []
-        img_emb = self.vlm_with_expert.embed_image(images)
+        img_emb = self.vlm_with_expert.embed_image(images)  # B*L, C, H, W
         img_emb_dim = img_emb.shape[-1]
         if self.use_image_norm == 1:
             # Default behaviour
@@ -824,7 +824,7 @@ class VLAFlowMatching(nn.Module):
         embs.extend(torch.split(img_emb, bsize))
         pad_masks.append(pad_img.reshape(bsize, -1))
         # att_masks += [0] * (num_img_embs) if not self.use_context else [1] + [0] * (num_img_embs - 1)
-        att_masks = [0] * (num_img_embs * len(images))
+        att_masks = [0] * (num_img_embs * len(embs))  # L = len(embs)
 
         if torch.compiler.is_exporting():
             # lang_tokens are already embedded and normalized
@@ -971,6 +971,11 @@ class VLAFlowMatching(nn.Module):
         prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(
             images, img_masks, lang_tokens, lang_masks, state=state
         )
+        return self.sample_actions_embeddings(self, prefix_embs, prefix_pad_masks, prefix_att_masks, noise)
+
+    def sample_actions_embeddings(self, prefix_embs, prefix_pad_masks, prefix_att_masks, noise):
+        bsize = prefix_embs.shape[0]
+        device = prefix_embs.device
         prefix_att_2d_masks = make_att_2d_masks(prefix_pad_masks, prefix_att_masks)
         prefix_position_ids = torch.cumsum(prefix_pad_masks, dim=1) - 1
         # Compute image and language key value cache

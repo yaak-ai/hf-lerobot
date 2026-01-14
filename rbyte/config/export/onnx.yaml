@@ -64,11 +64,11 @@ embedding_kwargs:
   resize_in_episode_construction: True
   dynamic_shapes: ${shape_kwargs}
 
-lm_expert_kwargs:
+action_kwargs:
   _recursive_: true
   _convert_: all
-  f: ${hydra:run.dir}/lm_expert/lm_expert.onnx
-  artifacts_dir: ${hydra:run.dir}/lm_expert
+  f: ${hydra:run.dir}/action/action.onnx
+  artifacts_dir: ${hydra:run.dir}/action
 
 dynamo_kwargs:
   _recursive_: true
@@ -87,19 +87,4 @@ onnx_kwargs:
   dump_exported_program: true
   opset_version: 19
   do_constant_folding: true
-  # dynamic_shapes:
-  #   images:
-  #     - _target_: torch.export.dynamic_shapes.Dim
-  #       name: batch_size
-  #       min: 1
-  #       max: 6
-  #     - _target_: torch.export.dynamic_shapes.Dim.STATIC
-  #     - _target_: torch.export.dynamic_shapes.Dim.STATIC
-  #     - _target_: torch.export.dynamic_shapes.Dim.STATIC
-  #   patch_attention_mask:
-  #     - _target_: torch.export.dynamic_shapes.Dim
-  #       name: batch_size
-  #       min: 1
-  #       max: 6
-  #     - _target_: torch.export.dynamic_shapes.Dim.STATIC
-  #     - _target_: torch.export.dynamic_shapes.Dim.STATIC 
+

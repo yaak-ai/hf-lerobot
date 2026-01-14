@@ -26,8 +26,27 @@ if TYPE_CHECKING:
     from torch.utils.data import DataLoader
 
 
+class ExportActionModel(torch.nn.Module):
+    def __init__(self, policy: PreTrainedPolicy) -> None:
+        super().__init__()
+        self.policy = policy
+
+    def forward(
+        self,
+        prefix_embs: torch.Tensor,
+        prefix_pad_masks: torch.Tensor,
+        prefix_att_masks: torch.Tensor,
+        noise: torch.Tensor,
+    ) -> torch.Tensor:
+        return self.policy.model.sample_actions_embeddings(
+            prefix_embs, prefix_pad_masks, prefix_att_masks, noise
+        )
+
+
 class ExportEmbeddingModel(torch.nn.Module):
-    def __init__(self, policy: PreTrainedPolicy, lang_emb, lang_masks):
+    def __init__(
+        self, policy: PreTrainedPolicy, lang_emb: torch.Tensor, lang_masks: torch.Tensor
+    ) -> None:
         super().__init__()
         self.policy = policy
 
@@ -57,15 +76,13 @@ class ExportEmbeddingModel(torch.nn.Module):
         self.policy.register_buffer("lang_emb", lang_emb)
         self.policy.register_buffer("lang_masks", lang_masks)
 
-    def forward(self, batch: dict):
+    def forward(self, batch: dict) -> tuple:
         batch = self.policy._prepare_batch(batch)  # noqa: SLF001
         bsize, seq_len = batch[OBS_IMAGE].shape[:2]
         device = batch[OBS_IMAGE].device
         images, img_masks = (
             batch[OBS_IMAGE].reshape(-1, *batch[OBS_IMAGE].shape[2:]),  # B*L, C, W, H
-            torch.ones(
-                (bsize, seq_len, 1), dtype=torch.bool, device=device
-            ),  # B, L, 1
+            torch.ones((bsize, seq_len, 1), dtype=torch.bool, device=device),  # B, L, 1
         )
         state = (
             self.policy.prepare_state(batch)
@@ -168,20 +185,16 @@ def export_action(policy_vla, args, dynamo_kwargs, onnx_kwargs):
     pass
 
 
-def export_embedding(
+def export_embedding_model(
     policy_vla: PreTrainedPolicy,
     args: tuple,
     dynamo_kwargs,
     onnx_kwargs,
     wandb_logger: WandBLogger,
-):
+) -> tuple:
     batch, lang_emb, lang_masks = args
     policy = ExportEmbeddingModel(policy_vla, lang_emb, lang_masks)
     policy.eval()
-    # with torch.inference_mode(), pytest.MonkeyPatch.context() as m:  # noqa: SIM117
-    #     m.setattr("torch.compiler._is_exporting_flag", True)  # noqa: ERA001
-    #     result = policy(batch)  # noqa: ERA001
-
     exported_program = torch.export.export(mod=policy, args=(batch,), **dynamo_kwargs)
     _ = torch.onnx.export(
         model=exported_program,
@@ -194,15 +207,45 @@ def export_embedding(
     print(f"rsync -av valentina@berghain:{Path(onnx_kwargs['f']).resolve()} .")  # noqa: T201
     print(f"rsync -av {Path(onnx_kwargs['f']).name} valentina@delta:/home/valentina")  # noqa: T201
 
+    with torch.inference_mode(), pytest.MonkeyPatch.context() as m:
+        m.setattr("torch.compiler._is_exporting_flag", True)
+        (prefix_embs, prefix_pad_masks, prefix_att_masks) = policy(batch)
+        return prefix_embs, prefix_pad_masks, prefix_att_masks
 
-def init_wandb(cfg: DictConfig, policy_cfg: TrainPipelineConfig):
+
+def export_action_model(
+    policy_vla: PreTrainedPolicy,
+    args: tuple,
+    dynamo_kwargs,
+    onnx_kwargs,
+    wandb_logger: WandBLogger,
+) -> tuple:
+    policy = ExportActionModel(policy_vla)
+    policy.eval()
+    # with torch.inference_mode(), pytest.MonkeyPatch.context() as m:  # noqa: SIM117
+    #     m.setattr("torch.compiler._is_exporting_flag", True)  # noqa: ERA001
+    #     result = policy(*args)  # noqa: ERA001
+    exported_program = torch.export.export(mod=policy, args=(args), **dynamo_kwargs)
+    _ = torch.onnx.export(
+        model=exported_program,
+        args=(args),
+        **onnx_kwargs,
+    )
+    wandb_logger.log_onnx(Path(onnx_kwargs["artifacts_dir"]))
+    print(f"mkdir -p {Path(onnx_kwargs['f']).stem}")  # noqa: T201
+    print(f"cd {Path(onnx_kwargs['f']).stem}")  # noqa: T201
+    print(f"rsync -av valentina@berghain:{Path(onnx_kwargs['f']).resolve()} .")  # noqa: T201
+    print(f"rsync -av {Path(onnx_kwargs['f']).name} valentina@delta:/home/valentina")  # noqa: T201
+
+
+def init_wandb(cfg: DictConfig, policy_cfg: TrainPipelineConfig) -> WandBLogger:
     # Monkey patching: use policy config to initialize wandb logging
     policy_cfg.job_name = cfg.job_name
     policy_cfg.output_dir = cfg.artifacts_dir
     return WandBLogger(policy_cfg)
 
 
-def export_dynamo(cfg: DictConfig) -> None:
+def export_dynamo(cfg: DictConfig) -> None:  # noqa: PLR0914
     logging.debug("instantiating policy")  # noqa: LOG015
     dtype = torch.float16 if cfg.dtype == "torch.float16" else torch.float32
     policy_vla, policy_cfg = prepare_model_data(cfg, dtype)
@@ -212,7 +255,7 @@ def export_dynamo(cfg: DictConfig) -> None:
 
     # model specific kwargs
     embedding_kwargs = instantiate(cfg.embedding_kwargs)
-    lm_expert_kwargs = instantiate(cfg.lm_expert_kwargs)
+    action_kwargs = instantiate(cfg.action_kwargs)
     shape_kwargs = instantiate(cfg.shape_kwargs)
 
     batch = build_episode(cfg, torch.device(cfg.device), dtype)
@@ -224,16 +267,27 @@ def export_dynamo(cfg: DictConfig) -> None:
     dynamo_kwargs = instantiate(cfg.dynamo_kwargs)
     onnx_kwargs = instantiate(cfg.onnx_kwargs)
 
-    export_embedding(
+    logging.info("Exporting the embedding model")  # noqa: LOG015
+    prefix_embs, prefix_pad_masks, prefix_att_masks = export_embedding_model(
         policy_vla,
         args_embedding,
         dynamo_kwargs,
-        # {**dynamo_kwargs, **shape_kwargs},
+        # {**dynamo_kwargs, **shape_kwargs},  # noqa: ERA001
         {**onnx_kwargs, **embedding_kwargs},
         wandb_logger,
     )
+    logging.info("Exported the embedding model")  # noqa: LOG015
 
-    logging.info(f"exported to {cfg['artifacts_dir']}")  # noqa: G004, LOG015
+    args_action = (prefix_embs, prefix_pad_masks, prefix_att_masks, noise)
+    logging.info("Exported the action model")  # noqa: LOG015
+    export_action_model(
+        policy_vla,
+        args_action,
+        dynamo_kwargs,
+        {**onnx_kwargs, **action_kwargs},
+        wandb_logger,
+    )
+    logging.info("Exported the action model")  # noqa: LOG015
 
 
 @hydra.main(version_base=None)
