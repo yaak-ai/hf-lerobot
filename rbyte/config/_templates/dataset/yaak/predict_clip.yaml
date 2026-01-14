@@ -1,6 +1,11 @@
 #@yaml/text-templated-strings
 
+
 #@ drives = [
+#@     'Niro115-HQ/2023-05-16--10-47-33',
+#@ ]
+
+#@ default_drives = [
 #@     'Niro096-HQ/2023-01-11--13-47-36',
 #@     'Niro115-HQ/2023-05-16--10-47-33',
 #@     'G1-00428/2024-04-23--07-00-31',
@@ -325,7 +330,7 @@ samples:
         func:
           _target_: rbyte.io.DataFrameGroupByDynamic
           index_column: meta/ImageMetadata.cam_front_left/frame_idx
-          every: 10i
+          every: 100i
           period: 101i
           closed: left
           gather_every: 1
