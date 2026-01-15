@@ -96,7 +96,7 @@ def load_from_wandb_artifact(artifact: str, stats: Path) -> None:
 
     train_cfg.policy.pretrained_path = artifact_dir
     logging.info(pformat(asdict(train_cfg)))
-    train_cfg.policy.num_steps = 5
+    train_cfg.policy.num_steps = 10
     logging.info("Making policy.")
     policy = make_policy_yaak(
         cfg=train_cfg.policy,
