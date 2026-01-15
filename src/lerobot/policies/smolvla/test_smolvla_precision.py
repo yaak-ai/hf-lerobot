@@ -35,7 +35,8 @@ def plot_errors(short_names, d_orig, d, gt_actions_orig, drive):
     logging.info(f"Saved plot to {dest}")  # noqa: G004, LOG015
 
 
-def generate_error_table(l1_approx, l1_orig, short_names):
+def generate_error_table(l1_approx, l1_orig, short_names, drive):
+    print(drive)
     print("Negative values are good for the 1st two rows")  # noqa: T201
     print("| Error per action | " + " | ".join(short_names) + " |")  # noqa: T201
     print("|--------|" + "|".join(["--------"] * len(short_names)) + "|")  # noqa: T201
@@ -160,7 +161,7 @@ def test_fp16_tradeoff_drive(orig, converted, drive):
 
     l1_approx = compute_l1(actions, gt_actions, short_names, False)  # noqa: FBT003
     l1_orig = compute_l1(actions_orig, gt_actions_orig, short_names, False)  # noqa: FBT003
-    generate_error_table(l1_approx, l1_orig, short_names)
+    generate_error_table(l1_approx, l1_orig, short_names, drive)
     d_orig = np.abs(actions_orig - gt_actions_orig)
     d = np.abs(actions - gt_actions)
     plot_errors(short_names, d_orig, d, gt_actions_orig, drive)
