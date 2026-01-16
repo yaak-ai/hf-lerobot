@@ -1,6 +1,6 @@
-#!/usr/bin/env python
+# !/usr/bin/env python
 
-# Copyright 2025 The HuggingFace Inc. team. All rights reserved.
+# Copyright 2026 The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 
 import logging
 import time
+from typing import TypeAlias
 
 from lerobot.motors import Motor, MotorCalibration, MotorNormMode
 from lerobot.motors.feetech import (
@@ -25,20 +26,18 @@ from lerobot.motors.feetech import (
 from lerobot.utils.errors import DeviceAlreadyConnectedError, DeviceNotConnectedError
 
 from ..teleoperator import Teleoperator
-from .config_so101_leader import SO101LeaderConfig
+from .config_so_leader import SOLeaderTeleopConfig
 
 logger = logging.getLogger(__name__)
 
 
-class SO101Leader(Teleoperator):
-    """
-    SO-101 Leader Arm designed by TheRobotStudio and Hugging Face.
-    """
+class SOLeader(Teleoperator):
+    """Generic SO leader base for SO-100/101/10X teleoperators."""
 
-    config_class = SO101LeaderConfig
-    name = "so101_leader"
+    config_class = SOLeaderTeleopConfig
+    name = "so_leader"
 
-    def __init__(self, config: SO101LeaderConfig):
+    def __init__(self, config: SOLeaderTeleopConfig):
         super().__init__(config)
         self.config = config
         norm_mode_body = MotorNormMode.DEGREES if config.use_degrees else MotorNormMode.RANGE_M100_100
@@ -104,11 +103,15 @@ class SO101Leader(Teleoperator):
         input(f"Move {self} to the middle of its range of motion and press ENTER....")
         homing_offsets = self.bus.set_half_turn_homings()
 
+        full_turn_motor = "wrist_roll"
+        unknown_range_motors = [motor for motor in self.bus.motors if motor != full_turn_motor]
         print(
-            "Move all joints sequentially through their entire ranges "
-            "of motion.\nRecording positions. Press ENTER to stop..."
+            f"Move all joints except '{full_turn_motor}' sequentially through their "
+            "entire ranges of motion.\nRecording positions. Press ENTER to stop..."
         )
-        range_mins, range_maxes = self.bus.record_ranges_of_motion()
+        range_mins, range_maxes = self.bus.record_ranges_of_motion(unknown_range_motors)
+        range_mins[full_turn_motor] = 0
+        range_maxes[full_turn_motor] = 4095
 
         self.calibration = {}
         for motor, m in self.bus.motors.items():
@@ -137,6 +140,9 @@ class SO101Leader(Teleoperator):
             print(f"'{motor}' motor id set to {self.bus.motors[motor].id}")
 
     def get_action(self) -> dict[str, float]:
+        if not self.is_connected:
+            raise DeviceNotConnectedError(f"{self} is not connected.")
+
         start = time.perf_counter()
         action = self.bus.sync_read("Present_Position")
         action = {f"{motor}.pos": val for motor, val in action.items()}
@@ -145,7 +151,7 @@ class SO101Leader(Teleoperator):
         return action
 
     def send_feedback(self, feedback: dict[str, float]) -> None:
-        # TODO(rcadene, aliberts): Implement force feedback
+        # TODO: Implement force feedback
         raise NotImplementedError
 
     def disconnect(self) -> None:
@@ -154,3 +160,7 @@ class SO101Leader(Teleoperator):
 
         self.bus.disconnect()
         logger.info(f"{self} disconnected.")
+
+
+SO100Leader: TypeAlias = SOLeader
+SO101Leader: TypeAlias = SOLeader

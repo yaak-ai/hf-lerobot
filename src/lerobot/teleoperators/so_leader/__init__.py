@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2025 The HuggingFace Inc. team. All rights reserved.
+# Copyright 2026 The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,5 +14,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .bi_so100_follower import BiSO100Follower
-from .config_bi_so100_follower import BiSO100FollowerConfig
+from .config_so_leader import (
+    SO100LeaderConfig,
+    SO101LeaderConfig,
+    SOLeaderConfig,
+    SOLeaderTeleopConfig,
+)
+from .so_leader import SO100Leader, SO101Leader, SOLeader

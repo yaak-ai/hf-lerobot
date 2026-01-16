@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2025 The HuggingFace Inc. team. All rights reserved.
+# Copyright 2026 The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,5 +14,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .config_so101_follower import SO101FollowerConfig
-from .so101_follower import SO101Follower
+from .config_so_follower import (
+    SO100FollowerConfig,
+    SO101FollowerConfig,
+    SOFollowerConfig,
+    SOFollowerRobotConfig,
+)
+from .so_follower import SO100Follower, SO101Follower, SOFollower

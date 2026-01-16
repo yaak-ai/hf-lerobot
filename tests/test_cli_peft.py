@@ -7,6 +7,12 @@ from safetensors.torch import load_file
 
 from .utils import require_package
 
+# Skip this entire module in CI
+pytestmark = pytest.mark.skipif(
+    os.environ.get("CI") == "true" or os.environ.get("GITHUB_ACTIONS") == "true",
+    reason="This test requires peft and is very slow, not meant for CI",
+)
+
 
 def run_command(cmd, module, args):
     module = importlib.import_module(f"lerobot.scripts.{module}")
@@ -208,7 +214,7 @@ def test_peft_record_loads_policy(policy_type, tmp_path):
         loaded_policy = kwargs["policy"]
 
     with (
-        patch("lerobot.robots.make_robot_from_config", dummy_make_robot_from_config),
+        patch("lerobot.scripts.lerobot_record.make_robot_from_config", dummy_make_robot_from_config),
         # disable record loop since we're only interested in successful loading of the policy.
         patch("lerobot.scripts.lerobot_record.record_loop", dummy_record_loop),
         # disable speech output

@@ -15,14 +15,28 @@
 # limitations under the License.
 
 from dataclasses import dataclass
+from typing import TypeAlias
 
 from ..config import TeleoperatorConfig
 
 
-@TeleoperatorConfig.register_subclass("so101_leader")
 @dataclass
-class SO101LeaderConfig(TeleoperatorConfig):
+class SOLeaderConfig:
+    """Base configuration class for SO Leader teleoperators."""
+
     # Port to connect to the arm
     port: str
 
+    # Whether to use degrees for angles
     use_degrees: bool = False
+
+
+@TeleoperatorConfig.register_subclass("so101_leader")
+@TeleoperatorConfig.register_subclass("so100_leader")
+@dataclass
+class SOLeaderTeleopConfig(TeleoperatorConfig, SOLeaderConfig):
+    pass
+
+
+SO100LeaderConfig: TypeAlias = SOLeaderTeleopConfig
+SO101LeaderConfig: TypeAlias = SOLeaderTeleopConfig
