@@ -27,9 +27,11 @@ if TYPE_CHECKING:
 
 
 class ExportActionModel(torch.nn.Module):
-    def __init__(self, policy: PreTrainedPolicy) -> None:
+    def __init__(self, policy: PreTrainedPolicy, action_dim) -> None:
         super().__init__()
         self.policy = policy
+        self.action_dim = action_dim
+
 
     def forward(
         self,
@@ -38,9 +40,14 @@ class ExportActionModel(torch.nn.Module):
         prefix_att_masks: torch.Tensor,
         noise: torch.Tensor,
     ) -> torch.Tensor:
-        return self.policy.model.sample_actions_embeddings(
+        actions = self.policy.model.sample_actions_embeddings(
             prefix_embs, prefix_pad_masks, prefix_att_masks, noise
-        )
+        )[:, :, :self.action_dim]
+        # Clamp gas and brake, as denoising (with smaller no of steps) can produce negative values
+        actions[:, :, :-1] = torch.clamp(actions[:, :, :-1], min=0, max=1)
+        # For steering, clamping may not be necasrry but just to be on the safe side
+        actions[:, :, -1] = torch.clamp(actions[:, :, -1], -1, 1)
+        return actions
 
 
 class ExportEmbeddingModel(torch.nn.Module):
@@ -219,7 +226,9 @@ def export_action_model(
     # Overwrite the number of denoising steps
     policy_vla.config.num_steps = onnx_kwargs["num_steps"]
     onnx_kwargs.pop("num_steps")
-    policy = ExportActionModel(policy_vla)
+    action_dim = onnx_kwargs["action_dim"]
+    onnx_kwargs.pop("action_dim")
+    policy = ExportActionModel(policy_vla, action_dim)
     policy.eval()
     # with torch.inference_mode(), pytest.MonkeyPatch.context() as m:  # noqa: SIM117
     #     m.setattr("torch.compiler._is_exporting_flag", True)  # noqa: ERA001
