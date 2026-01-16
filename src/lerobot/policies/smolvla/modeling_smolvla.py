@@ -812,19 +812,23 @@ class VLAFlowMatching(nn.Module):
         embs = []
         pad_masks = []
         att_masks = []
-        img_emb = self.vlm_with_expert.embed_image(images)  # B*L, C, H, W
+        img_emb = self.vlm_with_expert.embed_image(images.reshape(-1, *images.shape[-3:]))  # B*L, C, H, W
         img_emb_dim = img_emb.shape[-1]
         if self.use_image_norm == 1:
             # Default behaviour
             img_emb *= torch.tensor(img_emb_dim**0.5, dtype=img_emb.dtype, device=img_emb.device)
         elif self.use_image_norm == 2:
             img_emb = torch.nn.functional.normalize(img_emb, p=2, dim=-1)
-        bsize, num_img_embs = img_masks.shape[0], img_emb.shape[1]
+        bsize, seq_len, num_img_embs = images.shape[0], images.shape[1], img_emb.shape[1]
         pad_img = img_masks.expand(*img_masks.shape[:-1], num_img_embs)
-        embs.extend(torch.split(img_emb, bsize))
+        embs.append(img_emb.reshape(bsize, seq_len * num_img_embs, img_emb_dim))
         pad_masks.append(pad_img.reshape(bsize, -1))
-        # att_masks += [0] * (num_img_embs) if not self.use_context else [1] + [0] * (num_img_embs - 1)
-        att_masks = [0] * (num_img_embs * len(embs))  # L = len(embs)
+        if torch.compiler.is_exporting():
+            # dynamic_shapes: att_masks as a list of tensors to avoid dynamo errors
+            att_masks.append(torch.zeros(num_img_embs * seq_len, dtype=torch.bool, device=img_emb.device))
+        else:
+            # att_masks += [0] * (num_img_embs) if not self.use_context else [1] + [0] * (num_img_embs - 1)
+            att_masks = [0] * (num_img_embs * seq_len)  # L = len(embs)
 
         if torch.compiler.is_exporting():
             # lang_tokens are already embedded and normalized
@@ -839,23 +843,32 @@ class VLAFlowMatching(nn.Module):
         pad_masks.append(lang_masks)
 
         num_lang_embs = embs[-1].shape[1]
-        att_masks += [0] * num_lang_embs
+
+        if torch.compiler.is_exporting():
+            att_masks.append(torch.zeros(num_lang_embs, dtype=torch.bool, device=lang_masks.device))
+        else:
+            att_masks += [0] * num_lang_embs
 
         state_emb = self.state_proj(state) if not self.use_separate_intent else torch.cat([self.intent_proj(state[0]), self.state_proj(state[1])], axis=1)
         state_emb = state_emb[:, None, :] if state_emb.ndim == 2 else state_emb
         embs.append(state_emb)
-        bsize = state_emb.shape[0]
+        # bsize = state_emb.shape[0]
         device = state_emb.device
 
         states_seq_len = state_emb.shape[1]
         state_mask = torch.ones(bsize, states_seq_len, dtype=torch.bool, device=device)
         pad_masks.append(state_mask)
-
         # Set attention masks so that image and language inputs do not attend to state or actions
-        att_masks += [1] * (states_seq_len)
+        if torch.compiler.is_exporting():
+            att_masks.append(torch.ones(states_seq_len, dtype=torch.bool, device=device))
+        else:
+            att_masks += [1] * (states_seq_len)
         embs = torch.cat(embs, dim=1)
         pad_masks = torch.cat(pad_masks, dim=1)
-        att_masks = torch.tensor(att_masks, dtype=torch.bool, device=pad_masks.device)
+        if torch.compiler.is_exporting():
+            att_masks = torch.cat(att_masks)
+        else:
+            att_masks = torch.tensor(att_masks, dtype=torch.bool, device=pad_masks.device)
         att_masks = att_masks[None, :]
 
         seq_len = pad_masks.shape[1]

@@ -81,7 +81,7 @@ class ExportEmbeddingModel(torch.nn.Module):
         bsize, seq_len = batch[OBS_IMAGE].shape[:2]
         device = batch[OBS_IMAGE].device
         images, img_masks = (
-            batch[OBS_IMAGE].reshape(-1, *batch[OBS_IMAGE].shape[2:]),  # B*L, C, W, H
+            batch[OBS_IMAGE],  # B, L, C, W, H
             torch.ones((bsize, seq_len, 1), dtype=torch.bool, device=device),  # B, L, 1
         )
         state = (
@@ -270,8 +270,7 @@ def export_dynamo(cfg: DictConfig) -> None:  # noqa: PLR0914
     prefix_embs, prefix_pad_masks, prefix_att_masks = export_embedding_model(
         policy_vla,
         args_embedding,
-        dynamo_kwargs,
-        # {**dynamo_kwargs, **shape_kwargs},  # noqa: ERA001
+        {**dynamo_kwargs, **shape_kwargs},
         {**onnx_kwargs, **embedding_kwargs},
         wandb_logger,
     )

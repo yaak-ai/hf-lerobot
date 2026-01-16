@@ -23,10 +23,7 @@ shape_kwargs:
   dynamic_shapes:
     batch:
       observation.images.front_left:
-        - _target_: torch.export.dynamic_shapes.Dim
-          name: batch_size
-          min: 1
-          max: 32
+        - _target_: torch.export.dynamic_shapes.Dim.STATIC
         - _target_: torch.export.dynamic_shapes.Dim
           name: obs_history
           min: 1
@@ -35,20 +32,14 @@ shape_kwargs:
         - _target_: torch.export.dynamic_shapes.Dim.STATIC
         - _target_: torch.export.dynamic_shapes.Dim.STATIC
       observation.state.vehicle:
-        - _target_: torch.export.dynamic_shapes.Dim
-          name: batch_size
-          min: 1
-          max: 32
+        - _target_: torch.export.dynamic_shapes.Dim.STATIC
         - _target_: torch.export.dynamic_shapes.Dim
           name: obs_history
           min: 1
           max: 6
         - _target_: torch.export.dynamic_shapes.Dim.STATIC
       observation.state.waypoints:
-        - _target_: torch.export.dynamic_shapes.Dim
-          name: batch_size
-          min: 1
-          max: 32
+        - _target_: torch.export.dynamic_shapes.Dim.STATIC
         - _target_: torch.export.dynamic_shapes.Dim
           name: obs_history
           min: 1
@@ -63,6 +54,10 @@ embedding_kwargs:
   artifacts_dir: ${hydra:run.dir}/vision
   resize_in_episode_construction: True
   dynamic_shapes: ${shape_kwargs}
+  output_names:
+    - prefix_embs
+    - prefix_pad_masks
+    - prefix_att_masks
 
 action_kwargs:
   _recursive_: true
@@ -70,6 +65,8 @@ action_kwargs:
   f: ${hydra:run.dir}/action/action3.onnx
   artifacts_dir: ${hydra:run.dir}/action
   num_steps: 3
+  output_names:
+    - actions
 
 dynamo_kwargs:
   _recursive_: true
