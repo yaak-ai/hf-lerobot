@@ -27,11 +27,10 @@ if TYPE_CHECKING:
 
 
 class ExportActionModel(torch.nn.Module):
-    def __init__(self, policy: PreTrainedPolicy, action_dim) -> None:
+    def __init__(self, policy: PreTrainedPolicy, action_dim: int) -> None:
         super().__init__()
         self.policy = policy
         self.action_dim = action_dim
-
 
     def forward(
         self,
@@ -42,12 +41,16 @@ class ExportActionModel(torch.nn.Module):
     ) -> torch.Tensor:
         actions = self.policy.model.sample_actions_embeddings(
             prefix_embs, prefix_pad_masks, prefix_att_masks, noise
-        )[:, :, :self.action_dim]
+        )[:, :, : self.action_dim]
         # Clamp gas and brake, as denoising (with smaller no of steps) can produce negative values
-        actions[:, :, :-1] = torch.clamp(actions[:, :, :-1], min=0, max=1)
         # For steering, clamping may not be necasrry but just to be on the safe side
-        actions[:, :, -1] = torch.clamp(actions[:, :, -1], -1, 1)
-        return actions
+        return torch.cat(
+            [
+                torch.clamp(actions[:, :, :-1], min=0, max=1),
+                torch.clamp(actions[:, :, -1:], min=-1, max=1),
+            ],
+            dim=-1,
+        )
 
 
 class ExportEmbeddingModel(torch.nn.Module):
@@ -205,10 +208,12 @@ def export_embedding_model(
         **onnx_kwargs,
     )
     wandb_logger.log_onnx(Path(onnx_kwargs["artifacts_dir"]))
-    print(f"mkdir -p {Path(onnx_kwargs['f']).stem}")  # noqa: T201
-    print(f"cd {Path(onnx_kwargs['f']).stem}")  # noqa: T201
-    print(f"rsync -av valentina@berghain:{Path(onnx_kwargs['f']).resolve()} .")  # noqa: T201
-    print(f"rsync -av {Path(onnx_kwargs['f']).name} valentina@delta:/home/valentina")  # noqa: T201
+    logging.info(f"""
+    mkdir -p {Path(onnx_kwargs["f"]).stem}
+    cd {Path(onnx_kwargs["f"]).stem}
+    rsync -av valentina@berghain:{Path(onnx_kwargs["f"]).resolve()} .
+    rsync -av {Path(onnx_kwargs["f"]).name} valentina@delta:/home/valentina
+    """)  # noqa: G004, LOG015
 
     with torch.inference_mode(), pytest.MonkeyPatch.context() as m:
         m.setattr("torch.compiler._is_exporting_flag", True)
@@ -240,10 +245,12 @@ def export_action_model(
         **onnx_kwargs,
     )
     wandb_logger.log_onnx(Path(onnx_kwargs["artifacts_dir"]))
-    print(f"mkdir -p {Path(onnx_kwargs['f']).stem}")  # noqa: T201
-    print(f"cd {Path(onnx_kwargs['f']).stem}")  # noqa: T201
-    print(f"rsync -av valentina@berghain:{Path(onnx_kwargs['f']).resolve()} .")  # noqa: T201
-    print(f"rsync -av {Path(onnx_kwargs['f']).name} valentina@delta:/home/valentina")  # noqa: T201
+    logging.info(f"""
+    mkdir -p {Path(onnx_kwargs["f"]).stem}
+    cd {Path(onnx_kwargs["f"]).stem}
+    rsync -av valentina@berghain:{Path(onnx_kwargs["f"]).resolve()} .
+    rsync -av {Path(onnx_kwargs["f"]).name} valentina@delta:/home/valentina
+    """)  # noqa: G004, LOG015
 
 
 def init_wandb(cfg: DictConfig, policy_cfg: TrainPipelineConfig) -> WandBLogger:
@@ -255,6 +262,10 @@ def init_wandb(cfg: DictConfig, policy_cfg: TrainPipelineConfig) -> WandBLogger:
 
 def export_dynamo(cfg: DictConfig) -> None:  # noqa: PLR0914
     logging.debug("instantiating policy")  # noqa: LOG015
+
+    # torch.backends.cudnn.benchmark = True
+    # torch.backends.cuda.matmul.allow_tf32 = True
+
     dtype = torch.float16 if cfg.dtype == "torch.float16" else torch.float32
     policy_vla, policy_cfg = prepare_model_data(cfg, dtype)
     logging.info(f"instantiating the model of {dtype}")  # noqa: G004, LOG015
