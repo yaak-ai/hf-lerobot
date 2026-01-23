@@ -95,9 +95,12 @@ def load_from_wandb_artifact(artifact: str, stats: Path) -> None:
     train_cfg = TrainPipelineConfig.from_pretrained(artifact_dir)
 
     train_cfg.policy.pretrained_path = artifact_dir
-    logging.info(pformat(asdict(train_cfg)))
+    set_seed(train_cfg.seed)  # set seed before instantiation a policy
     train_cfg.policy.num_steps = 10
-    logging.info("Making policy.")
+
+    logging.info(pformat(asdict(train_cfg)))  # noqa: LOG015
+    logging.info("Making policy.")  # noqa: LOG015
+
     policy = make_policy_yaak(
         cfg=train_cfg.policy,
         stats=dataset_stats,
