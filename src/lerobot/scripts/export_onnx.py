@@ -111,6 +111,27 @@ class ExportEmbeddingModel(torch.nn.Module):
         return prefix_embs, prefix_pad_masks, prefix_att_masks
 
 
+class ExportDualModel(torch.nn.Module):
+    def __init__(
+        self,
+        policy: PreTrainedPolicy,
+        lang_emb: torch.Tensor,
+        lang_masks: torch.Tensor,
+        action_dim: int,
+    ) -> None:
+        super().__init__()
+        self.embedding_model = ExportEmbeddingModel(policy, lang_emb, lang_masks)
+        self.action_model = ExportActionModel(policy, action_dim)
+
+    def forward(self, batch: dict, noise: torch.Tensor) -> torch.Tensor:
+        (prefix_embs, prefix_pad_masks, prefix_att_masks) = self.embedding_model(batch)
+        return (
+            prefix_embs,
+            prefix_pad_masks,
+            prefix_att_masks,
+            self.action_model(prefix_embs, prefix_pad_masks, prefix_att_masks, noise),
+        )
+
 def build_episode(
     cfg: DictConfig,
     device: torch.device,
@@ -178,6 +199,89 @@ def update_episode_for_policy(
         device=device,
     )
     return lang_emb, lang_masks, noise
+
+
+def prepare_data_for_accuracy_test(
+    cfg: DictConfig,
+    device: torch.device,
+    dtype: torch.dtype,
+    policy_vla: PreTrainedPolicy,
+    lang_emb: torch.Tensor,
+    lang_masks: torch.Tensor,
+    noise: torch.Tensor,
+) -> None:
+    dataloader_test: DataLoader = instantiate(cfg.datamodule)
+    w, h = 512, 512
+    policy_dual = ExportDualModel(policy_vla, lang_emb, lang_masks, 3)
+    policy_emb = ExportEmbeddingModel(policy_vla, lang_emb, lang_masks)
+    noise_cpu = noise.clone().cpu()
+    collected_data = []
+    for _, elem in enumerate(dataloader_test):  # noqa: FURB148
+        batch = __getbatch__(elem)
+        for k, v in batch.items():
+            if isinstance(v, torch.Tensor):
+                if v.dtype != dtype:
+                    batch[k] = v.to(dtype)
+                batch[k] = batch[k].to(device)
+        batch.pop("meta/ImageMetadata.cam_front_left/time_stamp", None)
+        batch[OBS_IMAGE] = resize_with_pad(
+            torch.reshape(batch[OBS_IMAGE], (-1, *batch[OBS_IMAGE].shape[-3:])),
+            w,
+            h,
+            pad_value=0,
+        ).reshape((
+            *batch[OBS_IMAGE].shape[:-2],
+            w,
+            h,
+        ))
+        # Siglip normalization
+        batch[OBS_IMAGE] *= 2.0
+        batch[OBS_IMAGE] -= 1.0
+        # task = batch.pop("task")  # noqa: ERA001
+        with torch.inference_mode(), pytest.MonkeyPatch.context() as m:
+            m.setattr("torch.compiler._is_exporting_flag", True)
+            # result = policy_dual(batch, noise.clone())  # noqa: ERA001
+            prefix_embs, prefix_pad_masks, prefix_att_masks = policy_emb(batch)
+
+        # Collect batch and noise, moving to CPU for portability
+        batch_cpu = {
+            k: v.cpu() if isinstance(v, torch.Tensor) else v for k, v in batch.items()
+        }
+        collected_data.append({
+            "batch": batch_cpu,
+            "prefix_embs": prefix_embs.cpu(),
+            "prefix_pad_masks": prefix_pad_masks.cpu(),
+            "prefix_att_masks": prefix_att_masks.cpu()
+        })
+    # Serialize collected data to file
+    output_path = Path(cfg.artifacts_dir) / "accuracy_test_data.pt"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    torch.save(
+        {
+            "data": collected_data,
+            "noise": noise_cpu,
+            "lang_emb": lang_emb.cpu(),
+            "lang_masks": lang_masks.cpu(),
+            "metadata": {
+                "dtype": str(dtype),
+                "device": str(device),
+                "num_batches": len(collected_data),
+                "image_size": (w, h),
+                "chunk_size": policy_vla.config.chunk_size,
+                "max_action_dim": policy_vla.config.max_action_dim,
+            },
+        },
+        output_path,
+    )
+
+    logging.info(f"Saved {len(collected_data)} batches to {output_path}")  # noqa: G004, LOG015
+
+    logging.info(f"""
+    cd delta_accuracy
+    rsync -av valentina@berghain:{output_path.resolve()} .
+    rsync -av {output_path.name} valentina@delta:/home/valentina/data
+    """)  # noqa: G004, LOG015
 
 
 def prepare_model_data(cfg: DictConfig, dtype: torch.dtype) -> None:
@@ -281,6 +385,11 @@ def export_dynamo(cfg: DictConfig) -> None:  # noqa: PLR0914
     lang_emb, lang_masks, noise = update_episode_for_policy(
         embedding_kwargs, policy_vla, batch, torch.device(cfg.device), dtype
     )
+
+    prepare_data_for_accuracy_test(
+        cfg, torch.device(cfg.device), dtype, policy_vla, lang_emb, lang_masks, noise
+    )
+
     args_embedding = (batch, lang_emb, lang_masks)
 
     dynamo_kwargs = instantiate(cfg.dynamo_kwargs)
