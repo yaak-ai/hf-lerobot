@@ -4,13 +4,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import hydra
+import numpy as np
+import onnxruntime as ort
 import pytest
 import torch
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 
 from lerobot.configs.train import TrainPipelineConfig
-from lerobot.constants_yaak import ACTION, OBS_IMAGE
+from lerobot.constants_yaak import ACTION, OBS_IMAGE, OBS_STATE, OBS_STATE_VEHICLE
 from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.policies.smolvla.conversion_utils_yaak import __getbatch__
 from lerobot.policies.smolvla.modeling_smolvla import resize_with_pad
@@ -24,6 +26,84 @@ from lerobot.utils.wandb_utils import WandBLogger
 
 if TYPE_CHECKING:
     from torch.utils.data import DataLoader
+
+
+class ExportStateModel(torch.nn.Module):
+    def __init__(
+        self,
+        policy: PreTrainedPolicy,
+        lang_emb: torch.Tensor,
+        lang_masks: torch.Tensor,
+        norm_bounds: tuple,
+    ) -> None:
+        super().__init__()
+        self.policy = policy
+        # Save language embeddings into a buffer
+        self.policy.register_buffer("lang_emb", lang_emb)
+        self.policy.register_buffer("lang_masks", lang_masks)
+
+        self.register_buffer(
+            "observation_state_vehicle_min",
+            norm_bounds[0][0],
+        )
+
+        self.register_buffer(
+            "observation_state_vehicle_max",
+            norm_bounds[0][1],
+        )
+
+        self.register_buffer(
+            "observation_state_waypoints_min",
+            norm_bounds[1][0],
+        )
+
+        self.register_buffer(
+            "observation_state_waypoints_max",
+            norm_bounds[1][1],
+        )
+
+    def _normalize_min_max(
+        self, min_val: torch.Tensor, max_val: torch.Tensor, input_tensor: torch.Tensor
+    ) -> torch.Tensor:
+        # normalize to [0,1]
+        input_tensor = (input_tensor - min_val) / (max_val - min_val + 1e-8)
+        # normalize to [-1, 1]
+        return input_tensor * 2 - 1
+
+    def forward(self, batch: dict) -> tuple:
+        batch[OBS_STATE_VEHICLE] = self._normalize_min_max(
+            self.observation_state_vehicle_min,
+            self.observation_state_vehicle_max,
+            batch[OBS_STATE_VEHICLE],
+        )
+        batch[OBS_STATE] = self._normalize_min_max(
+            self.observation_state_waypoints_min,
+            self.observation_state_waypoints_max,
+            batch[OBS_STATE],
+        )
+        state = (
+            self.policy.prepare_state(batch)
+            if not self.policy.use_context
+            else self.policy.prepare_state_context(batch)
+        )
+        state_emb = (
+            self.policy.model.state_proj(state)
+            if not self.policy.model.use_separate_intent
+            else torch.cat(
+                [
+                    self.policy.model.intent_proj(state[0]),
+                    self.policy.model.state_proj(state[1]),
+                ],
+                axis=1,
+            )
+        )
+        state_emb = state_emb[:, None, :] if state_emb.ndim == 2 else state_emb
+        device = state_emb.device
+        states_seq_len = state_emb.shape[1]
+        bsize = state_emb.shape[0]
+        state_mask = torch.ones(bsize, states_seq_len, dtype=torch.bool, device=device)
+        att_masks = torch.ones(states_seq_len, dtype=torch.bool, device=device)
+        return state_emb, state_mask, att_masks
 
 
 class ExportActionModel(torch.nn.Module):
@@ -132,6 +212,7 @@ class ExportDualModel(torch.nn.Module):
             self.action_model(prefix_embs, prefix_pad_masks, prefix_att_masks, noise),
         )
 
+
 def build_episode(
     cfg: DictConfig,
     device: torch.device,
@@ -189,6 +270,24 @@ def update_episode_for_policy(
     # after tokenization, task text is no longer needed in the batch
     batch.pop("task")
 
+    # Normalization parameters
+    norm_bounds = (
+        torch.tensor(
+            [
+                policy_vla.dataset_stats[OBS_STATE_VEHICLE]["min"],
+                policy_vla.dataset_stats[OBS_STATE_VEHICLE]["max"],
+            ],
+            dtype=dtype,
+            device=device,
+        ),
+        torch.stack([
+            torch.from_numpy(policy_vla.dataset_stats[OBS_STATE]["min"]),
+            torch.from_numpy(policy_vla.dataset_stats[OBS_STATE]["max"]),
+        ])
+        .to(dtype)
+        .to(device),
+    )
+
     # Noise
     bsize = batch[OBS_IMAGE].shape[0]
     noise = torch.normal(
@@ -198,7 +297,7 @@ def update_episode_for_policy(
         dtype=dtype,
         device=device,
     )
-    return lang_emb, lang_masks, noise
+    return lang_emb, lang_masks, norm_bounds, noise
 
 
 def prepare_data_for_accuracy_test(
@@ -208,12 +307,20 @@ def prepare_data_for_accuracy_test(
     policy_vla: PreTrainedPolicy,
     lang_emb: torch.Tensor,
     lang_masks: torch.Tensor,
+    norm_bounds: tuple,
     noise: torch.Tensor,
 ) -> None:
     dataloader_test: DataLoader = instantiate(cfg.datamodule)
     w, h = 512, 512
     policy_dual = ExportDualModel(policy_vla, lang_emb, lang_masks, 3)
     policy_emb = ExportEmbeddingModel(policy_vla, lang_emb, lang_masks)
+    policy_state = ExportStateModel(
+        policy_vla,
+        lang_emb,
+        lang_masks,
+        norm_bounds,
+    )
+    onnx_path = Path("outputs/2026-01-26/18-57-51/vision/state_dynamic.onnx")
     noise_cpu = noise.clone().cpu()
     collected_data = []
     for _, elem in enumerate(dataloader_test):  # noqa: FURB148
@@ -237,12 +344,33 @@ def prepare_data_for_accuracy_test(
         # Siglip normalization
         batch[OBS_IMAGE] *= 2.0
         batch[OBS_IMAGE] -= 1.0
+
+        session = ort.InferenceSession(onnx_path)
+        prefix_embs_onnx, prefix_pad_masks_onnx, prefix_att_masks_onnx = session.run(
+            None,
+            {
+                "batch_observation_images_front_left": batch[OBS_IMAGE]
+                .clone()
+                .cpu()
+                .numpy(),
+                "batch_observation_state_vehicle": batch[OBS_STATE_VEHICLE]
+                .clone()
+                .cpu()
+                .numpy(),
+                "batch_observation_state_waypoints": batch[OBS_STATE]
+                .clone()
+                .cpu()
+                .numpy(),
+            },
+        )
         # task = batch.pop("task")  # noqa: ERA001
         with torch.inference_mode(), pytest.MonkeyPatch.context() as m:
             m.setattr("torch.compiler._is_exporting_flag", True)
             # result = policy_dual(batch, noise.clone())  # noqa: ERA001
-            prefix_embs, prefix_pad_masks, prefix_att_masks = policy_emb(batch)
+            # prefix_embs, prefix_pad_masks, prefix_att_masks = policy_emb(batch)  # noqa: E501, ERA001
+            prefix_embs, prefix_pad_masks, prefix_att_masks = policy_state(batch)
 
+        prefix_embs_error = np.abs((prefix_embs_onnx - prefix_embs.cpu().numpy()))
         # Collect batch and noise, moving to CPU for portability
         batch_cpu = {
             k: v.cpu() if isinstance(v, torch.Tensor) else v for k, v in batch.items()
@@ -251,7 +379,7 @@ def prepare_data_for_accuracy_test(
             "batch": batch_cpu,
             "prefix_embs": prefix_embs.cpu(),
             "prefix_pad_masks": prefix_pad_masks.cpu(),
-            "prefix_att_masks": prefix_att_masks.cpu()
+            "prefix_att_masks": prefix_att_masks.cpu(),
         })
     # Serialize collected data to file
     output_path = Path(cfg.artifacts_dir) / "accuracy_test_data.pt"
@@ -298,12 +426,12 @@ def prepare_model_data(cfg: DictConfig, dtype: torch.dtype) -> None:
 def export_embedding_model(
     policy_vla: PreTrainedPolicy,
     args: tuple,
-    dynamo_kwargs,
-    onnx_kwargs,
+    dynamo_kwargs: dict,
+    onnx_kwargs: dict,
     wandb_logger: WandBLogger,
 ) -> tuple:
-    batch, lang_emb, lang_masks = args
-    policy = ExportEmbeddingModel(policy_vla, lang_emb, lang_masks)
+    batch, lang_emb, lang_masks, norm_bounds = args
+    policy = ExportStateModel(policy_vla, lang_emb, lang_masks, norm_bounds)
     policy.eval()
     exported_program = torch.export.export(mod=policy, args=(batch,), **dynamo_kwargs)
     _ = torch.onnx.export(
@@ -382,15 +510,22 @@ def export_dynamo(cfg: DictConfig) -> None:  # noqa: PLR0914
     shape_kwargs = instantiate(cfg.shape_kwargs)
 
     batch = build_episode(cfg, torch.device(cfg.device), dtype)
-    lang_emb, lang_masks, noise = update_episode_for_policy(
+    lang_emb, lang_masks, norm_bounds, noise = update_episode_for_policy(
         embedding_kwargs, policy_vla, batch, torch.device(cfg.device), dtype
     )
 
     prepare_data_for_accuracy_test(
-        cfg, torch.device(cfg.device), dtype, policy_vla, lang_emb, lang_masks, noise
+        cfg,
+        torch.device(cfg.device),
+        dtype,
+        policy_vla,
+        lang_emb,
+        lang_masks,
+        norm_bounds,
+        noise,
     )
 
-    args_embedding = (batch, lang_emb, lang_masks)
+    args_embedding = (batch, lang_emb, lang_masks, norm_bounds)
 
     dynamo_kwargs = instantiate(cfg.dynamo_kwargs)
     onnx_kwargs = instantiate(cfg.onnx_kwargs)
@@ -404,6 +539,7 @@ def export_dynamo(cfg: DictConfig) -> None:  # noqa: PLR0914
         wandb_logger,
     )
     logging.info("Exported the embedding model")  # noqa: LOG015
+    exit(0)
 
     args_action = (prefix_embs, prefix_pad_masks, prefix_att_masks, noise)
     logging.info("Exported the action model")  # noqa: LOG015
