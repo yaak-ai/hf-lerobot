@@ -48,6 +48,12 @@ shape_kwargs:
         - _target_: torch.export.dynamic_shapes.Dim.STATIC
 
 
+normalization_kwargs:
+  _recursive_: true
+  _convert_: all
+  f: ${hydra:run.dir}/normalization/normalization.pt
+
+
 embedding_kwargs:
   _recursive_: true
   _convert_: all
