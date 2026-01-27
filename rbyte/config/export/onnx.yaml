@@ -57,7 +57,7 @@ normalization_kwargs:
 embedding_kwargs:
   _recursive_: true
   _convert_: all
-  f: ${hydra:run.dir}/vision/state_dynamic.onnx
+  f: ${hydra:run.dir}/vision/embedding_dynamic.onnx
   artifacts_dir: ${hydra:run.dir}/vision
   resize_in_episode_construction: True
   dynamic_shapes: ${shape_kwargs}

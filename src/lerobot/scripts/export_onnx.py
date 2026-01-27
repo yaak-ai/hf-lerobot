@@ -130,7 +130,7 @@ class ExportEmbeddingModel(torch.nn.Module):
         self.policy.register_buffer("lang_masks", lang_masks)
 
     def forward(self, batch: dict) -> tuple:
-        batch = self.policy._prepare_batch(batch)  # noqa: SLF001
+        # Normalization in episode construction
         bsize, seq_len = batch[OBS_IMAGE].shape[:2]
         device = batch[OBS_IMAGE].device
         images, img_masks = (
@@ -300,10 +300,12 @@ def prepare_data_for_accuracy_test(
 ) -> None:
     dataloader_test = instantiate(cfg.datamodule)
     w, h = 512, 512
-    policy_dual = ExportDualModel(policy_vla, lang_emb, lang_masks, 3)
+    # policy_dual = ExportDualModel(policy_vla, lang_emb, lang_masks, 3)
+    # policy_state = ExportStateModel(policy_vla, lang_emb, lang_masks)
     policy_emb = ExportEmbeddingModel(policy_vla, lang_emb, lang_masks)
-    policy_state = ExportStateModel(policy_vla, lang_emb, lang_masks)
-    onnx_path = Path("outputs/2026-01-27/15-19-45/vision/state_dynamic.onnx")
+    policy_action = ExportActionModel(policy_vla, 3)
+    onnx_path = Path("outputs/2026-01-27/15-39-09/vision/embedding_dynamic.onnx")
+    onnx_path = Path("outputs/2026-01-27/16-03-51/action/action3.onnx")
     noise_cpu = noise.clone().cpu()
     collected_data = []
     for _, elem in enumerate(dataloader_test):  # noqa: FURB148
@@ -330,36 +332,56 @@ def prepare_data_for_accuracy_test(
 
         _normalize_state(normalization_parameters, batch)
 
-        session = ort.InferenceSession(onnx_path)
-        prefix_embs_onnx, prefix_pad_masks_onnx, prefix_att_masks_onnx = session.run(
-            None,
-            {
-                "batch_observation_images_front_left": batch[OBS_IMAGE]
-                .clone()
-                .cpu()
-                .numpy(),
-                "batch_observation_state_vehicle": batch[OBS_STATE_VEHICLE]
-                .clone()
-                .cpu()
-                .numpy(),
-                "batch_observation_state_waypoints": batch[OBS_STATE]
-                .clone()
-                .cpu()
-                .numpy(),
-            },
-        )
+        # session = ort.InferenceSession(onnx_path)
+        # prefix_embs_onnx, prefix_pad_masks_onnx, prefix_att_masks_onnx = session.run(
+        #     None,
+        #     {
+        #         "batch_observation_images_front_left": batch[OBS_IMAGE]
+        #         .clone()
+        #         .cpu()
+        #         .numpy(),
+        #         "batch_observation_state_vehicle": batch[OBS_STATE_VEHICLE]
+        #         .clone()
+        #         .cpu()
+        #         .numpy(),
+        #         "batch_observation_state_waypoints": batch[OBS_STATE]
+        #         .clone()
+        #         .cpu()
+        #         .numpy(),
+        #     },
+        # )
         # task = batch.pop("task")  # noqa: ERA001
         with torch.inference_mode(), pytest.MonkeyPatch.context() as m:
             m.setattr("torch.compiler._is_exporting_flag", True)
             # result = policy_dual(batch, noise.clone())  # noqa: ERA001
             # prefix_embs, prefix_pad_masks, prefix_att_masks = policy_emb(batch)  # noqa: E501, ERA001
-            prefix_embs, prefix_pad_masks, prefix_att_masks = policy_state({
+            prefix_embs, prefix_pad_masks, prefix_att_masks = policy_emb({
                 OBS_IMAGE: batch[OBS_IMAGE].clone(),
                 OBS_STATE_VEHICLE: batch[OBS_STATE_VEHICLE].clone(),
                 OBS_STATE: batch[OBS_STATE].clone(),
             })
 
-        prefix_pad_masks_error = np.abs((prefix_embs_onnx - prefix_embs.cpu().numpy()))
+            session = ort.InferenceSession(onnx_path)
+            actions_onnx = session.run(
+                None,
+                {
+                    "prefix_embs": prefix_embs.clone().cpu().numpy(),
+                    "prefix_pad_masks": prefix_pad_masks.clone().cpu().numpy(),
+                    "prefix_att_masks": prefix_att_masks.clone().cpu().numpy(),
+                    "noise": noise.clone().cpu().numpy(),
+                },
+            )
+            actions = policy_action(
+                prefix_embs.clone(),
+                prefix_pad_masks.clone(),
+                prefix_att_masks.clone(),
+                noise.clone(),
+            )
+
+        action_error = np.abs((actions_onnx[0][0, 0, ...] - actions[0, 0, ...].cpu().numpy()))
+        logging.info(f"Action error {action_error}")
+        action_error_horizon = np.abs((actions_onnx[0][0, :4, ...] - actions[0, :4, ...].cpu().numpy()))
+        logging.info(f"Action error horizon {action_error_horizon}")
         # Collect batch and noise, moving to CPU for portability
         batch_cpu = {
             k: v.cpu() if isinstance(v, torch.Tensor) else v for k, v in batch.items()
@@ -369,6 +391,7 @@ def prepare_data_for_accuracy_test(
             "prefix_embs": prefix_embs.cpu(),
             "prefix_pad_masks": prefix_pad_masks.cpu(),
             "prefix_att_masks": prefix_att_masks.cpu(),
+            "actions": actions.cpu(),
         })
     # Serialize collected data to file
     output_path = Path(cfg.artifacts_dir) / "accuracy_test_data.pt"
@@ -455,7 +478,7 @@ def export_embedding_model(
     wandb_logger: WandBLogger,
 ) -> tuple:
     batch, lang_emb, lang_masks = args
-    policy = ExportStateModel(policy_vla, lang_emb, lang_masks)
+    policy = ExportEmbeddingModel(policy_vla, lang_emb, lang_masks)
     policy.eval()
     exported_program = torch.export.export(mod=policy, args=(batch,), **dynamo_kwargs)
     _ = torch.onnx.export(
@@ -574,7 +597,6 @@ def export_dynamo(cfg: DictConfig) -> None:  # noqa: PLR0914
         wandb_logger,
     )
     logging.info("Exported the embedding model")  # noqa: LOG015
-    exit(0)
 
     args_action = (prefix_embs, prefix_pad_masks, prefix_att_masks, noise)
     logging.info("Exported the action model")  # noqa: LOG015
