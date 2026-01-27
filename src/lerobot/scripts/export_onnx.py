@@ -12,9 +12,10 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig
 
 from lerobot.configs.train import TrainPipelineConfig
+from lerobot.configs.types import NormalizationMode
 from lerobot.constants_yaak import ACTION, OBS_IMAGE, OBS_STATE, OBS_STATE_VEHICLE
 from lerobot.policies.pretrained import PreTrainedPolicy
-from lerobot.policies.smolvla.conversion_utils_yaak import __getbatch__
+from lerobot.policies.smolvla.conversion_utils_yaak import __getbatch__, patch_norm_mode
 from lerobot.policies.smolvla.modeling_smolvla import resize_with_pad
 from lerobot.policies.smolvla.modeling_smolvlm import (
     ExportSmolVLMVisionEmbeddings,
@@ -47,14 +48,38 @@ class ExportStateModel(torch.nn.Module):
         # normalize to [0,1]
         input_tensor = (input_tensor - min_val) / (max_val - min_val + 1e-8)
         # normalize to [-1, 1]
-        return input_tensor * 2 - 1
+        input_tensor = (
+            input_tensor
+            * torch.tensor(2, dtype=input_tensor.dtype, device=input_tensor.device)
+            - torch.tensor(1, dtype=input_tensor.dtype, device=input_tensor.device)
+        )
+        return torch.clamp(
+            input_tensor,
+            torch.tensor(-1, dtype=input_tensor.dtype, device=input_tensor.device),
+            torch.tensor(1, dtype=input_tensor.dtype, device=input_tensor.device),
+        )
+
+    def _normalize_zero_one(
+        self, min_val: torch.Tensor, max_val: torch.Tensor, input_tensor: torch.Tensor
+    ) -> torch.Tensor:
+        return (input_tensor - min_val) / (max_val - min_val + 1e-8)
 
     def forward(self, batch: dict) -> tuple:
-        batch[OBS_STATE_VEHICLE] = self._normalize_min_max(
+        # norm_mode = self.policy.normalize_inputs.norm_map.get("STATE", NormalizationMode.IDENTITY)
+        # norm_mode = patch_norm_mode(norm_mode, OBS_STATE_VEHICLE, batch)
+        # if norm_mode != NormalizationMode.ZERO_ONE:
+        #     msg = f"Update code to use {norm_mode} for {OBS_STATE_VEHICLE}"
+        #     raise ValueError(msg)
+        batch[OBS_STATE_VEHICLE] = self._normalize_zero_one(
             self.policy.normalize_inputs.buffer_observation_state_vehicle["min"],
             self.policy.normalize_inputs.buffer_observation_state_vehicle["max"],
             batch[OBS_STATE_VEHICLE],
         )
+        # norm_mode = self.policy.normalize_inputs.norm_map.get("STATE", NormalizationMode.IDENTITY)
+        # norm_mode = patch_norm_mode(norm_mode, OBS_STATE, batch)
+        # if norm_mode != NormalizationMode.MIN_MAX:
+        #     msg = f"Update code to use {norm_mode} for {OBS_STATE}"
+        #     raise ValueError(msg)
         batch[OBS_STATE] = self._normalize_min_max(
             self.policy.normalize_inputs.buffer_observation_state_waypoints["min"],
             self.policy.normalize_inputs.buffer_observation_state_waypoints["max"],
@@ -269,12 +294,12 @@ def prepare_data_for_accuracy_test(
     lang_masks: torch.Tensor,
     noise: torch.Tensor,
 ) -> None:
-    dataloader_test: DataLoader = instantiate(cfg.datamodule)
+    dataloader_test = instantiate(cfg.datamodule)
     w, h = 512, 512
     policy_dual = ExportDualModel(policy_vla, lang_emb, lang_masks, 3)
     policy_emb = ExportEmbeddingModel(policy_vla, lang_emb, lang_masks)
     policy_state = ExportStateModel(policy_vla, lang_emb, lang_masks)
-    onnx_path = Path("outputs/2026-01-26/18-57-51/vision/state_dynamic.onnx")
+    onnx_path = Path("outputs/2026-01-27/12-33-00/vision/state_dynamic.onnx")
     noise_cpu = noise.clone().cpu()
     collected_data = []
     for _, elem in enumerate(dataloader_test):  # noqa: FURB148
@@ -303,10 +328,7 @@ def prepare_data_for_accuracy_test(
         prefix_embs_onnx, prefix_pad_masks_onnx, prefix_att_masks_onnx = session.run(
             None,
             {
-                "batch_observation_images_front_left": batch[OBS_IMAGE]
-                .clone()
-                .cpu()
-                .numpy(),
+                "batch_observation_images_front_left": batch[OBS_IMAGE].clone().cpu().numpy(),
                 "batch_observation_state_vehicle": batch[OBS_STATE_VEHICLE]
                 .clone()
                 .cpu()
@@ -322,9 +344,18 @@ def prepare_data_for_accuracy_test(
             m.setattr("torch.compiler._is_exporting_flag", True)
             # result = policy_dual(batch, noise.clone())  # noqa: ERA001
             # prefix_embs, prefix_pad_masks, prefix_att_masks = policy_emb(batch)  # noqa: E501, ERA001
-            prefix_embs, prefix_pad_masks, prefix_att_masks = policy_state(batch)
+            prefix_embs, prefix_pad_masks, prefix_att_masks = policy_state({
+                OBS_IMAGE: batch[OBS_IMAGE].clone(),
+                OBS_STATE_VEHICLE: batch[OBS_STATE_VEHICLE].clone(),
+                OBS_STATE: batch[OBS_STATE].clone(),
+            })
 
-        prefix_embs_error = np.abs((prefix_embs_onnx - prefix_embs.cpu().numpy()))
+        prefix_pad_masks_error = np.abs(
+            (
+                prefix_embs_onnx.cpu().numpy()
+                - prefix_embs.cpu().numpy()
+            )
+        )
         # Collect batch and noise, moving to CPU for portability
         batch_cpu = {
             k: v.cpu() if isinstance(v, torch.Tensor) else v for k, v in batch.items()
