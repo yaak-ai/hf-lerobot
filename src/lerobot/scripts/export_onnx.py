@@ -327,8 +327,10 @@ def prepare_data_for_accuracy_test(
     onnx_actions = np.zeros(
         (len(dataloader_test.dataset), 3), dtype=torch_dtype_to_numpy(dtype)
     )
-    emb_onnx_path = Path("outputs/2026-01-27/16-03-51/vision/embedding_dynamic.onnx")
-    onnx_path = Path("outputs/2026-01-27/16-03-51/action/action3.onnx")
+    # emb_onnx_path = Path("outputs/2026-01-27/16-03-51/vision/embedding_dynamic.onnx")
+    # onnx_path = Path("outputs/2026-01-27/16-03-51/action/action3.onnx")
+    emb_onnx_path = Path("outputs/2026-01-28/18-34-11/vision/embedding_dynamic.onnx")
+    onnx_path = Path("outputs/2026-01-28/18-34-11/action/action3.onnx")
     noise_cpu = noise.clone().cpu()
     collected_data = []
     session = ort.InferenceSession(onnx_path)
@@ -368,35 +370,35 @@ def prepare_data_for_accuracy_test(
                 OBS_STATE: batch[OBS_STATE].clone(),
             })
 
-            prefix_embs_onnx, prefix_pad_masks_onnx, prefix_att_masks_onnx = (
-                session_emb.run(
-                    None,
-                    {
-                        "batch_observation_images_front_left": batch[OBS_IMAGE]
-                        .clone()
-                        .cpu()
-                        .numpy(),
-                        "batch_observation_state_vehicle": batch[OBS_STATE_VEHICLE]
-                        .clone()
-                        .cpu()
-                        .numpy(),
-                        "batch_observation_state_waypoints": batch[OBS_STATE]
-                        .clone()
-                        .cpu()
-                        .numpy(),
-                    },
-                )
-            )
+            # prefix_embs_onnx, prefix_pad_masks_onnx, prefix_att_masks_onnx = (
+            #     session_emb.run(
+            #         None,
+            #         {
+            #             "batch_observation_images_front_left": batch[OBS_IMAGE]
+            #             .clone()
+            #             .cpu()
+            #             .numpy(),
+            #             "batch_observation_state_vehicle": batch[OBS_STATE_VEHICLE]
+            #             .clone()
+            #             .cpu()
+            #             .numpy(),
+            #             "batch_observation_state_waypoints": batch[OBS_STATE]
+            #             .clone()
+            #             .cpu()
+            #             .numpy(),
+            #         },
+            #     )
+            # )
 
-            actions_onnx = session.run(
-                None,
-                {
-                    "prefix_embs": prefix_embs_onnx,
-                    "prefix_pad_masks": prefix_pad_masks_onnx,
-                    "prefix_att_masks": prefix_att_masks_onnx,
-                    "noise": noise.clone().cpu().numpy(),
-                },
-            )
+            # actions_onnx = session.run(
+            #     None,
+            #     {
+            #         "prefix_embs": prefix_embs_onnx,
+            #         "prefix_pad_masks": prefix_pad_masks_onnx,
+            #         "prefix_att_masks": prefix_att_masks_onnx,
+            #         "noise": noise.clone().cpu().numpy(),
+            #     },
+            # )
             actions = policy_action(
                 prefix_embs.clone(),
                 prefix_pad_masks.clone(),
@@ -404,22 +406,22 @@ def prepare_data_for_accuracy_test(
                 noise.clone(),
             )
             pred_actions[step, ...] = actions[0, 0, ...]
-            onnx_actions[step, ...] = actions_onnx[0][0, 0, ...]
-        embs_cpu = prefix_embs.cpu().numpy()
-        embedding_error = (
-            prefix_embs_onnx[0, : 64 * 6, ...] - embs_cpu[0, : 64 * 6, ...]
-        ).flatten()
-        state_lang_error = np.sum(
-            np.abs(prefix_embs_onnx[0, 64 * 6 :, ...] - embs_cpu[0, 64 * 6 :, ...])
-        )
-        action_error = np.abs(
-            actions_onnx[0][0, 0, ...] - actions[0, 0, ...].cpu().numpy()
-        )
-        logging.info(f"Action error {action_error}")  # noqa: G004, LOG015
-        logging.info(  # noqa: LOG015
-            f"Vision error [{np.max(embedding_error)}, {np.median(embedding_error)}, {embedding_error.min()}], S={np.sum(np.abs(embedding_error))}"  # noqa: E501, G004
-        )
-        logging.info(f"State lang error {state_lang_error}")  # noqa: G004, LOG015
+        #     onnx_actions[step, ...] = actions_onnx[0][0, 0, ...]
+        # embs_cpu = prefix_embs.cpu().numpy()
+        # embedding_error = (
+        #     prefix_embs_onnx[0, : 64 * 6, ...] - embs_cpu[0, : 64 * 6, ...]
+        # ).flatten()
+        # state_lang_error = np.sum(
+        #     np.abs(prefix_embs_onnx[0, 64 * 6 :, ...] - embs_cpu[0, 64 * 6 :, ...])
+        # )
+        # action_error = np.abs(
+        #     actions_onnx[0][0, 0, ...] - actions[0, 0, ...].cpu().numpy()
+        # )
+        # logging.info(f"Action error {action_error}")  # noqa: G004, LOG015
+        # logging.info(  # noqa: LOG015
+        #     f"Vision error [{np.max(embedding_error)}, {np.median(embedding_error)}, {embedding_error.min()}], S={np.sum(np.abs(embedding_error))}"  # noqa: E501, G004
+        # )
+        # logging.info(f"State lang error {state_lang_error}")  # noqa: G004, LOG015
         # action_error_horizon = np.abs((actions_onnx[0][0, :4, ...] - actions[0, :4, ...].cpu().numpy()))  # noqa: ERA001
         # logging.info(f"Action error horizon {action_error_horizon}")  # noqa: ERA001
         # Collect batch and noise, moving to CPU for portability
@@ -434,7 +436,7 @@ def prepare_data_for_accuracy_test(
             "actions": actions.cpu(),
         })
     # Serialize collected data to file
-    output_path = Path(cfg.artifacts_dir) / "accuracy_test_data.pt"
+    output_path = Path(cfg.artifacts_dir) / "accuracy_test_data_bfloat16.pt"
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     torch.save(
@@ -498,6 +500,7 @@ def prepare_model_data(cfg: DictConfig, dtype: torch.dtype) -> None:
         m.setattr("torch.compiler._is_exporting_flag", True)
         policy, train_cfg = instantiate(cfg.model)
 
+    # policy = policy.to(dtype).to(cfg.device)
     policy = policy.to(dtype).to(cfg.device)
     policy.eval()
     return policy, train_cfg
@@ -651,7 +654,6 @@ def export_dynamo(cfg: DictConfig) -> None:  # noqa: PLR0914
         noise,
     )
     exit(0)
-
     args_embedding = (batch, lang_emb, lang_masks)
 
     dynamo_kwargs = instantiate(cfg.dynamo_kwargs)
