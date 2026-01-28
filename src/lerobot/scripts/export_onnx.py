@@ -327,12 +327,13 @@ def prepare_data_for_accuracy_test(
     onnx_actions = np.zeros(
         (len(dataloader_test.dataset), 3), dtype=torch_dtype_to_numpy(dtype)
     )
-    onnx_path = Path("outputs/2026-01-27/16-03-51/vision/embedding_dynamic.onnx")
+    emb_onnx_path = Path("outputs/2026-01-27/16-03-51/vision/embedding_dynamic.onnx")
     onnx_path = Path("outputs/2026-01-27/16-03-51/action/action3.onnx")
     noise_cpu = noise.clone().cpu()
     collected_data = []
     session = ort.InferenceSession(onnx_path)
-    for step, elem in tqdm(enumerate(dataloader_test)):  # noqa: FURB148
+    session_emb = ort.InferenceSession(emb_onnx_path)
+    for step, elem in tqdm(enumerate(dataloader_test)):
         batch = __getbatch__(elem)
         for k, v in batch.items():
             if isinstance(v, torch.Tensor):
@@ -356,24 +357,6 @@ def prepare_data_for_accuracy_test(
 
         _normalize_state(normalization_parameters, batch)
 
-        # session = ort.InferenceSession(onnx_path)
-        # prefix_embs_onnx, prefix_pad_masks_onnx, prefix_att_masks_onnx = session.run(
-        #     None,
-        #     {
-        #         "batch_observation_images_front_left": batch[OBS_IMAGE]
-        #         .clone()
-        #         .cpu()
-        #         .numpy(),
-        #         "batch_observation_state_vehicle": batch[OBS_STATE_VEHICLE]
-        #         .clone()
-        #         .cpu()
-        #         .numpy(),
-        #         "batch_observation_state_waypoints": batch[OBS_STATE]
-        #         .clone()
-        #         .cpu()
-        #         .numpy(),
-        #     },
-        # )
         # task = batch.pop("task")  # noqa: ERA001
         with torch.inference_mode(), pytest.MonkeyPatch.context() as m:
             m.setattr("torch.compiler._is_exporting_flag", True)
@@ -385,12 +368,32 @@ def prepare_data_for_accuracy_test(
                 OBS_STATE: batch[OBS_STATE].clone(),
             })
 
+            prefix_embs_onnx, prefix_pad_masks_onnx, prefix_att_masks_onnx = (
+                session_emb.run(
+                    None,
+                    {
+                        "batch_observation_images_front_left": batch[OBS_IMAGE]
+                        .clone()
+                        .cpu()
+                        .numpy(),
+                        "batch_observation_state_vehicle": batch[OBS_STATE_VEHICLE]
+                        .clone()
+                        .cpu()
+                        .numpy(),
+                        "batch_observation_state_waypoints": batch[OBS_STATE]
+                        .clone()
+                        .cpu()
+                        .numpy(),
+                    },
+                )
+            )
+
             actions_onnx = session.run(
                 None,
                 {
-                    "prefix_embs": prefix_embs.clone().cpu().numpy(),
-                    "prefix_pad_masks": prefix_pad_masks.clone().cpu().numpy(),
-                    "prefix_att_masks": prefix_att_masks.clone().cpu().numpy(),
+                    "prefix_embs": prefix_embs_onnx,
+                    "prefix_pad_masks": prefix_pad_masks_onnx,
+                    "prefix_att_masks": prefix_att_masks_onnx,
                     "noise": noise.clone().cpu().numpy(),
                 },
             )
@@ -402,11 +405,23 @@ def prepare_data_for_accuracy_test(
             )
             pred_actions[step, ...] = actions[0, 0, ...]
             onnx_actions[step, ...] = actions_onnx[0][0, 0, ...]
-
-        # action_error = np.abs((actions_onnx[0][0, 0, ...] - actions[0, 0, ...].cpu().numpy()))
-        # logging.info(f"Action error {action_error}")
-        # action_error_horizon = np.abs((actions_onnx[0][0, :4, ...] - actions[0, :4, ...].cpu().numpy()))
-        # logging.info(f"Action error horizon {action_error_horizon}")
+        embs_cpu = prefix_embs.cpu().numpy()
+        embedding_error = (
+            prefix_embs_onnx[0, : 64 * 6, ...] - embs_cpu[0, : 64 * 6, ...]
+        ).flatten()
+        state_lang_error = np.sum(
+            np.abs(prefix_embs_onnx[0, 64 * 6 :, ...] - embs_cpu[0, 64 * 6 :, ...])
+        )
+        action_error = np.abs(
+            actions_onnx[0][0, 0, ...] - actions[0, 0, ...].cpu().numpy()
+        )
+        logging.info(f"Action error {action_error}")  # noqa: G004, LOG015
+        logging.info(  # noqa: LOG015
+            f"Vision error [{np.max(embedding_error)}, {np.median(embedding_error)}, {embedding_error.min()}], S={np.sum(np.abs(embedding_error))}"  # noqa: E501, G004
+        )
+        logging.info(f"State lang error {state_lang_error}")  # noqa: G004, LOG015
+        # action_error_horizon = np.abs((actions_onnx[0][0, :4, ...] - actions[0, :4, ...].cpu().numpy()))  # noqa: ERA001
+        # logging.info(f"Action error horizon {action_error_horizon}")  # noqa: ERA001
         # Collect batch and noise, moving to CPU for portability
         batch_cpu = {
             k: v.cpu() if isinstance(v, torch.Tensor) else v for k, v in batch.items()
@@ -635,6 +650,7 @@ def export_dynamo(cfg: DictConfig) -> None:  # noqa: PLR0914
         normalization_parameters,
         noise,
     )
+    exit(0)
 
     args_embedding = (batch, lang_emb, lang_masks)
 
