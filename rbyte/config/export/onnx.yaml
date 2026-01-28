@@ -7,14 +7,17 @@ defaults:
   - /datamodule: yaak/predict
   - _self_
 
-# device: cuda
-device: cpu
+device: cuda
+# device: cpu
 dtype: torch.float16
 
 job_name: onnx-smolvla-560000:v3-n10
 export_vision_separately: true
 
 artifacts_dir: ${hydra:run.dir}
+
+reye_torch: /nasa/team-space/artifacts/predictions/lerobot/export/torch
+reye_onnx: /nasa/team-space/artifacts/predictions/lerobot/export/onnx
 
 
 shape_kwargs:

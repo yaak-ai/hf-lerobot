@@ -1,3 +1,4 @@
+import datetime
 import logging
 import math
 from pathlib import Path
@@ -11,6 +12,7 @@ import torch
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from torch import nn
+from tqdm import tqdm
 
 from lerobot.configs.train import TrainPipelineConfig
 from lerobot.configs.types import FeatureType, NormalizationMode
@@ -23,6 +25,7 @@ from lerobot.policies.smolvla.modeling_smolvlm import (
     ExportSmolVLMVisionTransformer,
 )
 from lerobot.policies.utils import get_device_from_parameters
+from lerobot.utils.reye_utils import create_reye_df
 from lerobot.utils.utils import init_logging
 from lerobot.utils.wandb_utils import WandBLogger
 
@@ -298,17 +301,38 @@ def prepare_data_for_accuracy_test(
     normalization_parameters: dict,
     noise: torch.Tensor,
 ) -> None:
+    def torch_dtype_to_numpy(torch_dtype):
+        mapping = {
+            torch.float32: np.float32,
+            torch.float16: np.float16,
+            torch.float64: np.float64,
+            torch.int32: np.int32,
+            torch.int64: np.int64,
+            torch.int8: np.int8,
+            torch.uint8: np.uint8,
+            torch.bool: np.bool_,
+        }
+        return mapping.get(torch_dtype, np.float32)
+
     dataloader_test = instantiate(cfg.datamodule)
     w, h = 512, 512
     # policy_dual = ExportDualModel(policy_vla, lang_emb, lang_masks, 3)
     # policy_state = ExportStateModel(policy_vla, lang_emb, lang_masks)
     policy_emb = ExportEmbeddingModel(policy_vla, lang_emb, lang_masks)
     policy_action = ExportActionModel(policy_vla, 3)
-    onnx_path = Path("outputs/2026-01-27/15-39-09/vision/embedding_dynamic.onnx")
+
+    pred_actions = torch.zeros(
+        (len(dataloader_test.dataset), 3), dtype=dtype, device=device
+    )
+    onnx_actions = np.zeros(
+        (len(dataloader_test.dataset), 3), dtype=torch_dtype_to_numpy(dtype)
+    )
+    onnx_path = Path("outputs/2026-01-27/16-03-51/vision/embedding_dynamic.onnx")
     onnx_path = Path("outputs/2026-01-27/16-03-51/action/action3.onnx")
     noise_cpu = noise.clone().cpu()
     collected_data = []
-    for _, elem in enumerate(dataloader_test):  # noqa: FURB148
+    session = ort.InferenceSession(onnx_path)
+    for step, elem in tqdm(enumerate(dataloader_test)):  # noqa: FURB148
         batch = __getbatch__(elem)
         for k, v in batch.items():
             if isinstance(v, torch.Tensor):
@@ -361,7 +385,6 @@ def prepare_data_for_accuracy_test(
                 OBS_STATE: batch[OBS_STATE].clone(),
             })
 
-            session = ort.InferenceSession(onnx_path)
             actions_onnx = session.run(
                 None,
                 {
@@ -377,11 +400,13 @@ def prepare_data_for_accuracy_test(
                 prefix_att_masks.clone(),
                 noise.clone(),
             )
+            pred_actions[step, ...] = actions[0, 0, ...]
+            onnx_actions[step, ...] = actions_onnx[0][0, 0, ...]
 
-        action_error = np.abs((actions_onnx[0][0, 0, ...] - actions[0, 0, ...].cpu().numpy()))
-        logging.info(f"Action error {action_error}")
-        action_error_horizon = np.abs((actions_onnx[0][0, :4, ...] - actions[0, :4, ...].cpu().numpy()))
-        logging.info(f"Action error horizon {action_error_horizon}")
+        # action_error = np.abs((actions_onnx[0][0, 0, ...] - actions[0, 0, ...].cpu().numpy()))
+        # logging.info(f"Action error {action_error}")
+        # action_error_horizon = np.abs((actions_onnx[0][0, :4, ...] - actions[0, :4, ...].cpu().numpy()))
+        # logging.info(f"Action error horizon {action_error_horizon}")
         # Collect batch and noise, moving to CPU for portability
         batch_cpu = {
             k: v.cpu() if isinstance(v, torch.Tensor) else v for k, v in batch.items()
@@ -417,10 +442,38 @@ def prepare_data_for_accuracy_test(
 
     logging.info(f"Saved {len(collected_data)} batches to {output_path}")  # noqa: G004, LOG015
 
+    # reye serialization
+    # Handle cases with clip and without clip based on the timestamp
+    ts = dataloader_test.dataset.samples[
+        "meta/ImageMetadata.cam_front_left/time_stamp"
+    ][0]
+    df = create_reye_df(
+        dataloader_test,
+        pred_actions.cpu(),
+        is_without_clip=isinstance(ts, datetime.datetime),
+    )
+    reye_torch = Path(cfg.reye_torch)
+    reye_torch.mkdir(parents=True, exist_ok=True)
+    reye_path = reye_torch / "results.parquet"
+    df.write_parquet(reye_path)
+
+    df_onnx = create_reye_df(
+        dataloader_test, onnx_actions, is_without_clip=isinstance(ts, datetime.datetime)
+    )
+    reye_onnx = Path(cfg.reye_onnx)
+    reye_onnx.mkdir(parents=True, exist_ok=True)
+    reye_path = reye_onnx / "results.parquet"
+    df_onnx.write_parquet(reye_path)
+
+    delta_input = Path(cfg.artifacts_dir) / "samples.parquet"
+    dataloader_test.dataset.samples.write_parquet(delta_input)
+
     logging.info(f"""
     cd delta_accuracy
     rsync -av valentina@berghain:{output_path.resolve()} .
     rsync -av {output_path.name} valentina@delta:/home/valentina/data
+    rsync -av valentina@berghain:{delta_input.resolve()} .
+    rsync -av {delta_input.name} valentina@delta:/home/valentina/data
     """)  # noqa: G004, LOG015
 
 
