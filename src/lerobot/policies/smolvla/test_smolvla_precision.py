@@ -37,6 +37,8 @@ def plot_errors(short_names, d_orig, d, gt_actions_orig, drive):
 
 def generate_error_table(l1_approx, l1_orig, short_names, drive):
     print(drive)
+    print("Comparison with GT")
+    print("approx:=l1(approx, gt), orig=l1(orig, gt)")
     print("Negative values are good for the 1st two rows")  # noqa: T201
     print("| Error per action | " + " | ".join(short_names) + " |")  # noqa: T201
     print("|--------|" + "|".join(["--------"] * len(short_names)) + "|")  # noqa: T201
