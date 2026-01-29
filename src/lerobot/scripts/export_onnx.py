@@ -368,32 +368,32 @@ def prepare_data_for_accuracy_test(
                 OBS_STATE: batch[OBS_STATE].clone(),
             })
 
-            prefix_embs_onnx, prefix_pad_masks_onnx, prefix_att_masks_onnx = (
-                session_emb.run(
-                    None,
-                    {
-                        "batch_observation_images_front_left": batch[OBS_IMAGE]
-                        .clone()
-                        .cpu()
-                        .numpy(),
-                        "batch_observation_state_vehicle": batch[OBS_STATE_VEHICLE]
-                        .clone()
-                        .cpu()
-                        .numpy(),
-                        "batch_observation_state_waypoints": batch[OBS_STATE]
-                        .clone()
-                        .cpu()
-                        .numpy(),
-                    },
-                )
-            )
+            # prefix_embs_onnx, prefix_pad_masks_onnx, prefix_att_masks_onnx = (
+            #     session_emb.run(
+            #         None,
+            #         {
+            #             "batch_observation_images_front_left": batch[OBS_IMAGE]
+            #             .clone()
+            #             .cpu()
+            #             .numpy(),
+            #             "batch_observation_state_vehicle": batch[OBS_STATE_VEHICLE]
+            #             .clone()
+            #             .cpu()
+            #             .numpy(),
+            #             "batch_observation_state_waypoints": batch[OBS_STATE]
+            #             .clone()
+            #             .cpu()
+            #             .numpy(),
+            #         },
+            #     )
+            # )
 
             actions_onnx = session.run(
                 None,
                 {
-                    "prefix_embs": prefix_embs_onnx,
-                    "prefix_pad_masks": prefix_pad_masks_onnx,
-                    "prefix_att_masks": prefix_att_masks_onnx,
+                    "prefix_embs": prefix_embs.clone().cpu().numpy(),
+                    "prefix_pad_masks": prefix_pad_masks.clone().cpu().numpy(),
+                    "prefix_att_masks": prefix_att_masks.clone().cpu().numpy(),
                     "noise": noise.clone().cpu().numpy(),
                 },
             )

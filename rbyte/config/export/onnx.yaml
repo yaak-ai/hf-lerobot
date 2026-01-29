@@ -17,8 +17,8 @@ export_vision_separately: true
 
 artifacts_dir: ${hydra:run.dir}
 
-reye_torch: /nasa/team-space/artifacts/predictions/lerobot/export/torch
-reye_onnx: /nasa/team-space/artifacts/predictions/lerobot/export/onnx
+reye_torch: /nasa/team-space/artifacts/predictions/lerobot/export_action_only/torch
+reye_onnx: /nasa/team-space/artifacts/predictions/lerobot/export_action_only/onnx
 
 
 shape_kwargs:
