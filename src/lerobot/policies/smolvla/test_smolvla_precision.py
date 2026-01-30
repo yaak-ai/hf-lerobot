@@ -23,7 +23,13 @@ def plot_errors(short_names, d_orig, d, gt_actions_orig, drive):
             color="orange",
             linestyle="--",
         )
-        ax[i].plot(gt_actions_orig[:, i], label=f"{short_names[i]}", alpha=0.7)
+        ax[i].plot(
+            gt_actions_orig[:, i],
+            label=f"{short_names[i]}",
+            alpha=0.7,
+            marker="o",
+            markersize=2,
+        )
         ax[i].legend()
 
     plt.legend()
@@ -157,7 +163,7 @@ def test_fp16_tradeoff(cfg: DictConfig) -> None:
 
 
 def test_fp16_tradeoff_drive(orig, converted, drive):
-    logging.info(f"============ Testing drive {drive }===============")  # noqa: G004, LOG015
+    logging.info(f"============ Testing drive {drive}===============")  # noqa: G004, LOG015
     actions_orig, gt_actions_orig, _ = load_actions(orig)
     actions, gt_actions, short_names = load_actions(converted)
 

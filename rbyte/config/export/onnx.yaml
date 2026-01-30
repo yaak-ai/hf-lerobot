@@ -70,10 +70,26 @@ embedding_kwargs:
     - prefix_pad_masks
     - prefix_att_masks
 
-action_kwargs:
+action_inc_kwargs:
   _recursive_: true
   _convert_: all
-  f: ${hydra:run.dir}/action/action3.onnx
+  f: ${hydra:run.dir}/action/action_inc_3.onnx
+  artifacts_dir: ${hydra:run.dir}/action
+  num_steps: 3
+  action_dim: 3
+  context_length: 6
+  num_tokens:
+    - 64 # images
+    - 48 # language
+    - 1  # intent
+    - 1 # state
+  output_names:
+    - actions_gbs
+
+action_full_kwargs:
+  _recursive_: true
+  _convert_: all
+  f: ${hydra:run.dir}/action/action_full_3.onnx
   artifacts_dir: ${hydra:run.dir}/action
   num_steps: 3
   action_dim: 3
