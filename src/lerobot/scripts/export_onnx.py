@@ -33,106 +33,7 @@ if TYPE_CHECKING:
     from torch.utils.data import DataLoader
 
 
-
-class ExportActionModelIncremental(torch.nn.Module):
-    def __init__(
-        self,
-        policy: PreTrainedPolicy,
-        action_dim: int,
-        context_length: int,
-        num_tokens: list,
-    ) -> None:
-        super().__init__()
-        self.policy = policy
-        self.action_dim = action_dim
-        self.context_length = context_length
-        self.num_tokens = num_tokens
-
-    def forward(
-        self,
-        prefix_embs: torch.Tensor,
-        prefix_embs_cache: torch.Tensor,
-        prefix_pad_masks_cache: torch.Tensor,
-        prefix_att_masks_cache: torch.Tensor,
-        noise: torch.Tensor,
-    ) -> torch.Tensor:
-        prefix = torch.cat(
-            [
-                prefix_embs_cache[
-                    :,
-                    self.num_tokens[0] : self.num_tokens[0] * self.context_length,
-                    ...,
-                ],
-                prefix_embs[:, : self.num_tokens[0], ...],
-                # language
-                prefix_embs_cache[
-                    :,
-                    self.num_tokens[0] * self.context_length : self.num_tokens[0]
-                    * self.context_length  # images
-                    + self.num_tokens[1],  # language
-                    ...,
-                ],
-                # waypoints / intent
-                prefix_embs_cache[
-                    :,
-                    self.num_tokens[0] * self.context_length  # images
-                    + self.num_tokens[1]  # language
-                    + self.num_tokens[2] : self.num_tokens[0]
-                    * self.context_length  # images
-                    + self.num_tokens[1]  # language
-                    + self.num_tokens[2] * self.context_length,  # intent
-                    ...,
-                ],
-                prefix_embs[
-                    :,
-                    -self.num_tokens[-2] - self.num_tokens[-1] : -self.num_tokens[-1],
-                    ...,
-                ],
-                # state / speed
-                prefix_embs_cache[
-                    :,
-                    self.num_tokens[0] * self.context_length  # images
-                    + self.num_tokens[1]  # language
-                    + self.num_tokens[2] * self.context_length  # intent
-                    + self.num_tokens[3] : self.num_tokens[0]
-                    * self.context_length  # images
-                    + self.num_tokens[1]  # language
-                    + self.num_tokens[2] * self.context_length  # intent
-                    + self.num_tokens[3] * self.context_length,  # state
-                    ...,
-                ],
-                prefix_embs[
-                    :,
-                    -self.num_tokens[-1] :,
-                    ...,
-                ],
-            ],
-            dim=1,
-        )
-
-        actions = self.policy.model.sample_actions_embeddings(
-            prefix, prefix_pad_masks_cache, prefix_att_masks_cache, noise
-        )[:, :, : self.action_dim]
-        # Clamp gas and brake, as denoising (with smaller no of steps) can produce negative values
-        # For steering, clamping may not be necasrry but just to be on the safe side
-        return torch.cat(
-            [
-                torch.clamp(
-                    actions[:, :, :-1],
-                    min=torch.tensor(0.0).to(actions.device),
-                    max=torch.tensor(1.0).to(actions.device),
-                ),
-                torch.clamp(
-                    actions[:, :, -1:],
-                    min=torch.tensor(-1.0).to(actions.device),
-                    max=torch.tensor(1.0).to(actions.device),
-                ),
-            ],
-            dim=-1,
-        )
-
-
-class ExportActionModelFull(torch.nn.Module):
+class ExportActionModel(torch.nn.Module):
     def __init__(self, policy: PreTrainedPolicy, action_dim: int) -> None:
         super().__init__()
         self.policy = policy
@@ -167,7 +68,7 @@ class ExportActionModelFull(torch.nn.Module):
         )
 
 
-class ExportEmbeddingModel(torch.nn.Module):
+class ExportEmbeddingModelFull(torch.nn.Module):
     def __init__(
         self, policy: PreTrainedPolicy, lang_emb: torch.Tensor, lang_masks: torch.Tensor
     ) -> None:
@@ -225,7 +126,130 @@ class ExportEmbeddingModel(torch.nn.Module):
         return prefix_embs, prefix_pad_masks, prefix_att_masks
 
 
-class ExportDualModel(torch.nn.Module):
+class ExportEmbeddingModelIncremental(torch.nn.Module):
+    def __init__(
+        self,
+        policy: PreTrainedPolicy,
+        lang_emb: torch.Tensor,
+        lang_masks: torch.Tensor,
+        context_length: int,
+        num_tokens: list,
+    ) -> None:
+        super().__init__()
+        self.policy = policy
+        self.context_length = context_length
+        self.num_tokens = num_tokens
+
+        # replace SmolVLM components with export compatible versions
+        vision_tower = policy.model.vlm_with_expert.vlm.model.vision_model
+        dtype = next(vision_tower.parameters()).dtype
+        device = get_device_from_parameters(vision_tower)
+        export_tower = ExportSmolVLMVisionTransformer(vision_tower.config)
+        export_tower.load_state_dict(vision_tower.state_dict())
+        export_tower = export_tower.to(device).to(dtype)
+        policy.model.vlm_with_expert.vlm.model.vision_model = export_tower
+
+        vision_embeddings = (
+            policy.model.vlm_with_expert.vlm.model.vision_model.embeddings
+        )
+        dtype = next(vision_embeddings.parameters()).dtype
+        export_embeddings = ExportSmolVLMVisionEmbeddings(
+            policy.model.vlm_with_expert.vlm.model.vision_model.config
+        )
+        export_embeddings.load_state_dict(vision_embeddings.state_dict())
+        export_embeddings = export_embeddings.to(device).to(dtype)
+        policy.model.vlm_with_expert.vlm.model.vision_model.embeddings = (
+            export_embeddings
+        )
+
+        # Save language embeddings into a buffer
+        self.policy.register_buffer("lang_emb", lang_emb)
+        self.policy.register_buffer("lang_masks", lang_masks)
+
+    def forward(
+        self,
+        batch: dict,
+        prefix_embs_cache: torch.Tensor,
+        prefix_pad_masks_cache: torch.Tensor,
+        prefix_att_masks_cache: torch.Tensor,
+    ) -> tuple:
+        # Normalization in episode construction
+        bsize, seq_len = batch[OBS_IMAGE].shape[:2]
+        device = batch[OBS_IMAGE].device
+        images, img_masks = (
+            batch[OBS_IMAGE],  # B, L, C, W, H
+            torch.ones((bsize, seq_len, 1), dtype=torch.bool, device=device),  # B, L, 1
+        )
+        state = (
+            self.policy.prepare_state(batch)
+            if not self.policy.use_context
+            else self.policy.prepare_state_context(batch)
+        )
+        prefix_embs, _, _ = self.policy.model.embed_prefix(
+            images,
+            img_masks,
+            self.policy.lang_emb,
+            self.policy.lang_masks,
+            state=state,
+        )
+        prefix = torch.cat(
+            [
+                prefix_embs_cache[
+                    :,
+                    self.num_tokens[0] : self.num_tokens[0] * self.context_length,
+                    ...,
+                ],
+                prefix_embs[:, : self.num_tokens[0], ...],
+                # language
+                prefix_embs_cache[
+                    :,
+                    self.num_tokens[0] * self.context_length : self.num_tokens[0]
+                    * self.context_length  # images
+                    + self.num_tokens[1],  # language
+                    ...,
+                ],
+                # waypoints / intent
+                prefix_embs_cache[
+                    :,
+                    self.num_tokens[0] * self.context_length  # images
+                    + self.num_tokens[1]  # language
+                    + self.num_tokens[2] : self.num_tokens[0]
+                    * self.context_length  # images
+                    + self.num_tokens[1]  # language
+                    + self.num_tokens[2] * self.context_length,  # intent
+                    ...,
+                ],
+                prefix_embs[
+                    :,
+                    -self.num_tokens[-2] - self.num_tokens[-1] : -self.num_tokens[-1],
+                    ...,
+                ],
+                # state / speed
+                prefix_embs_cache[
+                    :,
+                    self.num_tokens[0] * self.context_length  # images
+                    + self.num_tokens[1]  # language
+                    + self.num_tokens[2] * self.context_length  # intent
+                    + self.num_tokens[3] : self.num_tokens[0]
+                    * self.context_length  # images
+                    + self.num_tokens[1]  # language
+                    + self.num_tokens[2] * self.context_length  # intent
+                    + self.num_tokens[3] * self.context_length,  # state
+                    ...,
+                ],
+                prefix_embs[
+                    :,
+                    -self.num_tokens[-1] :,
+                    ...,
+                ],
+            ],
+            dim=1,
+        )
+        # attention and padding masks are fixed
+        return prefix, prefix_pad_masks_cache, prefix_att_masks_cache
+
+
+class ExportModel(torch.nn.Module):
     def __init__(
         self,
         policy: PreTrainedPolicy,
@@ -234,11 +258,46 @@ class ExportDualModel(torch.nn.Module):
         action_dim: int,
     ) -> None:
         super().__init__()
-        self.embedding_model = ExportEmbeddingModel(policy, lang_emb, lang_masks)
-        self.action_model = ExportActionModelIncremental(policy, action_dim)
+        self.embedding_model = ExportEmbeddingModelFull(policy, lang_emb, lang_masks)
+        self.action_model = ExportActionModel(policy, action_dim)
 
     def forward(self, batch: dict, noise: torch.Tensor) -> torch.Tensor:
         (prefix_embs, prefix_pad_masks, prefix_att_masks) = self.embedding_model(batch)
+        return (
+            prefix_embs,
+            prefix_pad_masks,
+            prefix_att_masks,
+            self.action_model(prefix_embs, prefix_pad_masks, prefix_att_masks, noise),
+        )
+
+
+class ExportModelIncremental(torch.nn.Module):
+    def __init__(
+        self,
+        policy: PreTrainedPolicy,
+        lang_emb: torch.Tensor,
+        lang_masks: torch.Tensor,
+        context_length: int,
+        num_tokens: list,
+        action_dim: int,
+    ) -> None:
+        super().__init__()
+        self.embedding_model = ExportEmbeddingModelIncremental(
+            policy, lang_emb, lang_masks, context_length, num_tokens
+        )
+        self.action_model = ExportActionModel(policy, action_dim)
+
+    def forward(
+        self,
+        batch: dict,
+        prefix_embs_cache: torch.Tensor,
+        prefix_pad_masks_cache: torch.Tensor,
+        prefix_att_masks_cache: torch.Tensor,
+        noise: torch.Tensor,
+    ) -> torch.Tensor:
+        (prefix_embs, prefix_pad_masks, prefix_att_masks) = self.embedding_model(
+            batch, prefix_embs_cache, prefix_pad_masks_cache, prefix_att_masks_cache
+        )
         return (
             prefix_embs,
             prefix_pad_masks,
@@ -387,7 +446,7 @@ def prepare_data_for_accuracy_test(
     dataloader_test = instantiate(cfg.datamodule)
     w, h = 512, 512
     # policy_dual = ExportDualModel(policy_vla, lang_emb, lang_masks, 3)
-    policy_emb = ExportEmbeddingModel(policy_vla, lang_emb, lang_masks)
+    policy_emb = ExportEmbeddingModelFull(policy_vla, lang_emb, lang_masks)
     policy_action = ExportActionModelIncremental(policy_vla, 3)
 
     pred_actions = torch.zeros(
@@ -609,7 +668,7 @@ def export_normalization_params(
     return normalization_parameters
 
 
-def export_embedding_model(
+def export_embedding_model_full(
     policy_vla: PreTrainedPolicy,
     args: tuple,
     dynamo_kwargs: dict,
@@ -617,7 +676,7 @@ def export_embedding_model(
     wandb_logger: WandBLogger,
 ) -> tuple:
     batch, lang_emb, lang_masks = args
-    policy = ExportEmbeddingModel(policy_vla, lang_emb, lang_masks)
+    policy = ExportEmbeddingModelFull(policy_vla, lang_emb, lang_masks)
     policy.eval()
     exported_program = torch.export.export(mod=policy, args=(batch,), **dynamo_kwargs)
     _ = torch.onnx.export(
@@ -637,13 +696,64 @@ def export_embedding_model(
     with torch.inference_mode(), pytest.MonkeyPatch.context() as m:
         m.setattr("torch.compiler._is_exporting_flag", True)
         (prefix_embs, prefix_pad_masks, prefix_att_masks) = policy(batch)
-        (prefix_embs_batch_1, _, _) = policy({
-            k: v[:, :1, ...].clone() for k, v in batch.items()
-        })
-        return prefix_embs_batch_1, prefix_embs, prefix_pad_masks, prefix_att_masks
+        return prefix_embs, prefix_pad_masks, prefix_att_masks
 
 
-def export_action_model_incremental(
+def export_embedding_model_incremental(
+    policy_vla: PreTrainedPolicy,
+    args: tuple,
+    dynamo_kwargs: dict,
+    onnx_kwargs: dict,
+    wandb_logger: WandBLogger,
+) -> tuple:
+    (
+        batch,
+        prefix_embs_cache,
+        prefix_pad_masks_cache,
+        prefix_att_masks_cache,
+        lang_emb,
+        lang_masks,
+    ) = args
+    context_length = onnx_kwargs["context_length"]
+    onnx_kwargs.pop("context_length")
+    num_tokens = onnx_kwargs["num_tokens"]
+    onnx_kwargs.pop("num_tokens")
+    policy = ExportEmbeddingModelIncremental(
+        policy_vla, lang_emb, lang_masks, context_length, num_tokens
+    )
+    policy.eval()
+    args_inc = (
+        batch,
+        prefix_embs_cache,
+        prefix_pad_masks_cache,
+        prefix_att_masks_cache,
+    )
+    exported_program = torch.export.export(
+        mod=policy,
+        args=(args_inc),
+        **dynamo_kwargs,
+    )
+    _ = torch.onnx.export(
+        model=exported_program,
+        args=(args_inc),
+        **onnx_kwargs,
+    )
+    wandb_logger.log_onnx(Path(onnx_kwargs["artifacts_dir"]))
+    logging.info(f"""
+    mkdir -p {Path(onnx_kwargs["f"]).stem}
+    cd {Path(onnx_kwargs["f"]).stem}
+    rsync -av valentina@berghain:{Path(onnx_kwargs["f"]).resolve()} .
+    rsync -av {Path(onnx_kwargs["f"]).name} valentina@delta:/home/valentina
+    rsync -av {Path(onnx_kwargs["f"]).name} nvidia@delta-emc1:/home/nvidia/onnx_models
+    """)  # noqa: G004, LOG015
+
+    with torch.inference_mode(), pytest.MonkeyPatch.context() as m:
+        m.setattr("torch.compiler._is_exporting_flag", True)
+        (prefix_embs, prefix_pad_masks, prefix_att_masks) = policy(*args_inc)
+        return prefix_embs, prefix_pad_masks, prefix_att_masks
+
+
+def export_action_model(
     policy_vla: PreTrainedPolicy,
     args: tuple,
     dynamo_kwargs,
@@ -655,13 +765,7 @@ def export_action_model_incremental(
     onnx_kwargs.pop("num_steps")
     action_dim = onnx_kwargs["action_dim"]
     onnx_kwargs.pop("action_dim")
-    context_length = onnx_kwargs["context_length"]
-    onnx_kwargs.pop("context_length")
-    num_tokens = onnx_kwargs["num_tokens"]
-    onnx_kwargs.pop("num_tokens")
-    policy = ExportActionModelIncremental(
-        policy_vla, action_dim, context_length, num_tokens
-    )
+    policy = ExportActionModel(policy_vla, action_dim)
     policy.eval()
     # with torch.inference_mode(), pytest.MonkeyPatch.context() as m:  # noqa: SIM117
     #     m.setattr("torch.compiler._is_exporting_flag", True)  # noqa: ERA001
@@ -682,27 +786,92 @@ def export_action_model_incremental(
     """)  # noqa: G004, LOG015
 
 
-def export_action_model_full(
+def export_model_full(
     policy_vla: PreTrainedPolicy,
     args: tuple,
-    dynamo_kwargs,
-    onnx_kwargs,
+    dynamo_kwargs: dict,
+    onnx_kwargs: dict,
     wandb_logger: WandBLogger,
-) -> tuple:
+) -> None:
+    batch, lang_emb, lang_masks, noise = args
+
     # Overwrite the number of denoising steps
     policy_vla.config.num_steps = onnx_kwargs["num_steps"]
     onnx_kwargs.pop("num_steps")
     action_dim = onnx_kwargs["action_dim"]
     onnx_kwargs.pop("action_dim")
-    policy = ExportActionModelFull(policy_vla, action_dim)
+
+    policy = ExportModel(policy_vla, lang_emb, lang_masks, action_dim)
     policy.eval()
-    # with torch.inference_mode(), pytest.MonkeyPatch.context() as m:  # noqa: SIM117
-    #     m.setattr("torch.compiler._is_exporting_flag", True)  # noqa: ERA001
-    #     result = policy(*args)  # noqa: ERA001
-    exported_program = torch.export.export(mod=policy, args=(args), **dynamo_kwargs)
+    args_full = (batch, noise)
+    exported_program = torch.export.export(
+        mod=policy, args=(args_full), **dynamo_kwargs
+    )
     _ = torch.onnx.export(
         model=exported_program,
-        args=(args),
+        args=(args_full),
+        **onnx_kwargs,
+    )
+    wandb_logger.log_onnx(Path(onnx_kwargs["artifacts_dir"]))
+    logging.info(f"""
+    mkdir -p {Path(onnx_kwargs["f"]).stem}
+    cd {Path(onnx_kwargs["f"]).stem}
+    rsync -av valentina@berghain:{Path(onnx_kwargs["f"]).resolve()} .
+    rsync -av {Path(onnx_kwargs["f"]).name} valentina@delta:/home/valentina
+    rsync -av {Path(onnx_kwargs["f"]).name} nvidia@delta-emc1:/home/nvidia/onnx_models
+    """)  # noqa: G004, LOG015
+
+    with torch.inference_mode(), pytest.MonkeyPatch.context() as m:
+        m.setattr("torch.compiler._is_exporting_flag", True)
+        (prefix_embs, prefix_pad_masks, prefix_att_masks, _) = policy(*args_full)
+        return prefix_embs, prefix_pad_masks, prefix_att_masks
+
+
+def export_model_incremental(
+    policy_vla: PreTrainedPolicy,
+    args: tuple,
+    dynamo_kwargs: dict,
+    onnx_kwargs: dict,
+    wandb_logger: WandBLogger,
+) -> None:
+    (
+        batch,
+        prefix_embs_cache,
+        prefix_pad_masks_cache,
+        prefix_att_masks_cache,
+        lang_emb,
+        lang_masks,
+        noise,
+    ) = args
+    context_length = onnx_kwargs["context_length"]
+    onnx_kwargs.pop("context_length")
+    num_tokens = onnx_kwargs["num_tokens"]
+    onnx_kwargs.pop("num_tokens")
+
+    # Overwrite the number of denoising steps
+    policy_vla.config.num_steps = onnx_kwargs["num_steps"]
+    onnx_kwargs.pop("num_steps")
+    action_dim = onnx_kwargs["action_dim"]
+    onnx_kwargs.pop("action_dim")
+
+    policy = ExportModelIncremental(
+        policy_vla, lang_emb, lang_masks, context_length, num_tokens, action_dim
+    )
+    policy.eval()
+    args_inc = (
+        batch,
+        prefix_embs_cache,
+        prefix_pad_masks_cache,
+        prefix_att_masks_cache,
+        noise,
+    )
+    # with torch.inference_mode(), pytest.MonkeyPatch.context() as m:  # noqa: SIM117
+    #     m.setattr("torch.compiler._is_exporting_flag", True)  # noqa: ERA001
+    #     result = policy(*args_inc)  # noqa: ERA001
+    exported_program = torch.export.export(mod=policy, args=(args_inc), **dynamo_kwargs)
+    _ = torch.onnx.export(
+        model=exported_program,
+        args=(args_inc),
         **onnx_kwargs,
     )
     wandb_logger.log_onnx(Path(onnx_kwargs["artifacts_dir"]))
@@ -735,10 +904,12 @@ def export_dynamo(cfg: DictConfig) -> None:  # noqa: PLR0914
     wandb_logger = init_wandb(cfg, policy_cfg)
 
     # model specific kwargs
-    embedding_kwargs = instantiate(cfg.embedding_kwargs)
-    action_inc_kwargs = instantiate(cfg.action_inc_kwargs)
-    action_full_kwargs = instantiate(cfg.action_full_kwargs)
-    shape_kwargs = instantiate(cfg.shape_kwargs)
+    embedding_full_kwargs = instantiate(cfg.embedding_full_kwargs)
+    embedding_inc_kwargs = instantiate(cfg.embedding_inc_kwargs)
+    action_kwargs = instantiate(cfg.action_kwargs)
+
+    model_full_kwargs = instantiate(cfg.model_full_kwargs)
+    model_inc_kwargs = instantiate(cfg.model_inc_kwargs)
 
     batch = build_episode(cfg, torch.device(cfg.device), dtype)
 
@@ -748,7 +919,7 @@ def export_dynamo(cfg: DictConfig) -> None:  # noqa: PLR0914
     )
 
     lang_emb, lang_masks, noise = update_episode_for_policy(
-        embedding_kwargs,
+        embedding_full_kwargs,
         policy_vla,
         batch,
         torch.device(cfg.device),
@@ -767,39 +938,43 @@ def export_dynamo(cfg: DictConfig) -> None:  # noqa: PLR0914
         noise,
     )
 
-    args_embedding = (batch, lang_emb, lang_masks)
+    args_embedding = (batch, lang_emb.clone(), lang_masks.clone())
+    batch1 = {k: v[:, :1, :].clone() for k, v in batch.items()}
+    batch_model = {k: v.clone() for k, v in batch.items()}
 
     dynamo_kwargs = instantiate(cfg.dynamo_kwargs)
     onnx_kwargs = instantiate(cfg.onnx_kwargs)
 
     logging.info("Exporting the embedding model")  # noqa: LOG015
-    prefix_embs_batch_1, prefix_embs, prefix_pad_masks, prefix_att_masks = (
-        export_embedding_model(
-            policy_vla,
-            args_embedding,
-            {**dynamo_kwargs, **shape_kwargs},
-            {**onnx_kwargs, **embedding_kwargs},
-            wandb_logger,
-        )
+    prefix_embs, prefix_pad_masks, prefix_att_masks = export_embedding_model_full(
+        policy_vla,
+        args_embedding,
+        dynamo_kwargs,
+        {**onnx_kwargs, **embedding_full_kwargs},
+        wandb_logger,
     )
     logging.info("Exported the embedding model")  # noqa: LOG015
 
-    args_action = (
-        prefix_embs_batch_1,
+    # incremental embedding model
+    args_embedding_inc = (
+        batch1,
         prefix_embs.clone(),
         prefix_pad_masks.clone(),
         prefix_att_masks.clone(),
-        noise.clone(),
+        lang_emb.clone(),
+        lang_masks.clone(),
     )
-
-    export_action_model_incremental(
-        policy_vla,
-        args_action,
-        dynamo_kwargs,
-        {**onnx_kwargs, **action_inc_kwargs},
-        wandb_logger,
+    logging.info("Exporting the incremental embedding model")  # noqa: LOG015
+    prefix_embs, prefix_pad_masks, prefix_att_masks = (
+        export_embedding_model_incremental(
+            policy_vla,
+            args_embedding_inc,
+            dynamo_kwargs,
+            {**onnx_kwargs, **embedding_inc_kwargs},
+            wandb_logger,
+        )
     )
-    logging.info("Exported the incremental action model")  # noqa: LOG015
+    logging.info("Exported the incremental embedding model")  # noqa: LOG015
 
     args_action = (
         prefix_embs,
@@ -808,14 +983,43 @@ def export_dynamo(cfg: DictConfig) -> None:  # noqa: PLR0914
         noise,
     )
 
-    export_action_model_full(
+    export_action_model(
         policy_vla,
         args_action,
         dynamo_kwargs,
-        {**onnx_kwargs, **action_full_kwargs},
+        {**onnx_kwargs, **action_kwargs},
         wandb_logger,
     )
     logging.info("Exported the full action model")  # noqa: LOG015
+
+    args_full = (batch_model, lang_emb.clone(), lang_masks.clone(), noise.clone())
+
+    prefix_embs, prefix_pad_masks, prefix_att_masks = export_model_full(
+        policy_vla,
+        args_full,
+        dynamo_kwargs,
+        {**onnx_kwargs, **model_full_kwargs},
+        wandb_logger,
+    )
+    logging.info("Exported the full model")  # noqa: LOG015
+
+    args_inc = (
+        batch1,
+        prefix_embs.clone(),
+        prefix_pad_masks.clone(),
+        prefix_att_masks.clone(),
+        lang_emb.clone(),
+        lang_masks.clone(),
+        noise.clone(),
+    )
+    export_model_incremental(
+        policy_vla,
+        args_inc,
+        dynamo_kwargs,
+        {**onnx_kwargs, **model_inc_kwargs},
+        wandb_logger,
+    )
+    logging.info("Exported the incremental embedding model")  # noqa: LOG015
 
 
 @hydra.main(version_base=None)
