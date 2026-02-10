@@ -865,7 +865,7 @@ def export_model_incremental(
         prefix_att_masks_cache,
         noise,
     )
-    # with torch.inference_mode(), pytest.MonkeyPatch.context() as m:  # noqa: SIM117
+    # with torch.inference_mode(), pytest.MonkeyPatch.context() as m:
     #     m.setattr("torch.compiler._is_exporting_flag", True)  # noqa: ERA001
     #     result = policy(*args_inc)  # noqa: ERA001
     exported_program = torch.export.export(mod=policy, args=(args_inc), **dynamo_kwargs)
@@ -977,10 +977,10 @@ def export_dynamo(cfg: DictConfig) -> None:  # noqa: PLR0914
     logging.info("Exported the incremental embedding model")  # noqa: LOG015
 
     args_action = (
-        prefix_embs,
-        prefix_pad_masks,
-        prefix_att_masks,
-        noise,
+        prefix_embs.clone(),
+        prefix_pad_masks.clone(),
+        prefix_att_masks.clone(),
+        noise.clone(),
     )
 
     export_action_model(
@@ -990,7 +990,7 @@ def export_dynamo(cfg: DictConfig) -> None:  # noqa: PLR0914
         {**onnx_kwargs, **action_kwargs},
         wandb_logger,
     )
-    logging.info("Exported the full action model")  # noqa: LOG015
+    logging.info("Exported the action model")  # noqa: LOG015
 
     args_full = (batch_model, lang_emb.clone(), lang_masks.clone(), noise.clone())
 
