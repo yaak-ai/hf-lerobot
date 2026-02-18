@@ -26,10 +26,10 @@ def _eval_yaak(hydra_cfg: DictConfig) -> None:
 
     output_dir = (
         Path("/nasa/team-space/artifacts/predictions/lerobot/")
-        / "denoising" / "bfloat16x10" / Path(hydra_cfg.model.artifact).name / "same_noise"
+        / "tegel" / "delta" / "bfloat16x10" / Path(hydra_cfg.model.artifact).name / "same_noise"
     )
     output_dir.mkdir(parents=True, exist_ok=True)
-    # samples.write_parquet(output_dir / "dataset_300.parquet")  # noqa: ERA001
+    # samples.write_parquet(output_dir / "dataset_300.parquet.dataset")  # noqa: ERA001
     logging.info(f"Writing results to: {output_dir}")  # noqa: G004
     policy, train_cfg = instantiate(hydra_cfg.model)
     predict_main_yaak(policy, dataloader_test, train_cfg, output_dir)
