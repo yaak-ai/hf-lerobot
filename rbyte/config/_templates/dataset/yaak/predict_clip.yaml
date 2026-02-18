@@ -1,12 +1,6 @@
 #@yaml/text-templated-strings
 
-
-
 #@ drives = [
-#@     'G1-00459/2026-02-16--10-44-51',
-#@ ]
-
-#@ tegel_drives = [
 #@     'G1-00459/2026-02-16--11-01-36',
 #@     'G1-00459/2026-02-16--11-06-07',
 #@     'G1-00459/2026-02-16--10-44-51',
@@ -337,7 +331,7 @@ samples:
         func:
           _target_: rbyte.io.DataFrameGroupByDynamic
           index_column: meta/ImageMetadata.cam_front_left/frame_idx
-          every: 300i
+          every: 10i
           period: 101i
           closed: left
           gather_every: 1
