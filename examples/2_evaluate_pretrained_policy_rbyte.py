@@ -26,7 +26,7 @@ def _eval_yaak(hydra_cfg: DictConfig) -> None:
 
     output_dir = (
         Path("/nasa/team-space/artifacts/predictions/lerobot/")
-        / "tegel" / "delta" / "bfloat16x10" / Path(hydra_cfg.model.artifact).name / "same_noise"
+        / "tegel" / "delta" / "bfloat16x10" / Path(hydra_cfg.model.artifact).name / "ccw"
     )
     output_dir.mkdir(parents=True, exist_ok=True)
     # samples.write_parquet(output_dir / "dataset_300.parquet.dataset")  # noqa: ERA001
