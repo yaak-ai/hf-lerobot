@@ -35,5 +35,5 @@ use_acc_loss: False
 # Logging params
 log_freq: 50
 eval_freq: 10000
-train_run: train_smolvla_rmind_waypoints+speed_chunk_6_separate_pfa_loss32
+train_run: train_smolvla_single_speed
 

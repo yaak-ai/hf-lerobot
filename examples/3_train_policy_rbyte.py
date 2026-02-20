@@ -197,7 +197,7 @@ def _train_smolvla_rbyte(hydra_cfg: DictConfig) -> None:
         sys.argv.append(f"--config_path={hydra_cfg.model.config_path}")
     logging.info(f"Train job: {train_cfg.job_name}")  # noqa: G004
 
-    train_cfg.wandb.enable = True
+    train_cfg.wandb.enable = False
 
     json_cfg = f"{train_cfg.job_name}.json"
     with Path(json_cfg).open("w") as f:  # noqa: PLW1514

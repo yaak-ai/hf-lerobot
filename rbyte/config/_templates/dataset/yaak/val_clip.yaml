@@ -3,6 +3,11 @@
 
 #@ drives = [
 #@     'Niro115-HQ/2023-05-16--10-47-33',
+#@ ]
+
+
+#@ val_drives = [
+#@     'Niro115-HQ/2023-05-16--10-47-33',
 #@     'Niro104-HQ/2022-12-20--13-57-20',
 #@     'Niro122-HQ/2023-04-05--12-06-39',
 #@     'Niro102-HQ/2022-12-03--11-30-20',
@@ -326,7 +331,7 @@ samples:
         func:
           _target_: rbyte.io.DataFrameGroupByDynamic
           index_column: meta/ImageMetadata.cam_front_left/frame_idx
-          every: 10i
+          every: 1000i
           period: 101i
           closed: left
           gather_every: 1
@@ -344,7 +349,7 @@ samples:
             SELECT
                 list_slice("meta/ImageMetadata.cam_front_left/time_stamp"::TIMESTAMP[101], 1, 60, 10) AS "meta/ImageMetadata.cam_front_left/time_stamp",
                 list_slice("meta/ImageMetadata.cam_front_left/frame_idx"::INT32[101], 1, 60, 10) AS "meta/ImageMetadata.cam_front_left/frame_idx",
-                list_slice("meta/VehicleMotion/speed"::FLOAT[101], 1, 60, 10) AS "observation.state.vehicle",
+                ("meta/VehicleMotion/speed")[51] AS "observation.state.vehicle",
                 list_slice("meta/VehicleMotion/gas_pedal_normalized"::FLOAT[101],  52, 101, 1) AS "meta/VehicleMotion/gas_pedal_normalized",
                 list_slice("meta/VehicleMotion/brake_pedal_normalized"::FLOAT[101],  52, 101, 1) AS "meta/VehicleMotion/brake_pedal_normalized",
                 list_slice("meta/VehicleMotion/steering_angle_normalized"::FLOAT[101],  52, 101, 1) AS "meta/VehicleMotion/steering_angle_normalized",
