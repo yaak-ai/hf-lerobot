@@ -6,17 +6,17 @@ prefix_length: 0
 pad_language_to: "max_length"
 num_vlm_layers: 16
 # Training params
-optimizer_lr: 5e-5
-optimizer_betas: 
+optimizer_lr: 6.25e-5
+optimizer_betas:
   - 0.9
   - 0.95
 optimizer_weight_decay: 1e-10
 optimizer_grad_clip_norm: 10.0
-scheduler_decay_lr: 1.25E-6
-scheduler_warmup_steps: 33400
-scheduler_decay_steps: 1002000
-steps: 668000
-batch_size: 32
+scheduler_decay_lr: 1.5625e-6
+scheduler_warmup_steps: 26720
+scheduler_decay_steps: 801600
+steps: 534400
+batch_size: 40
 # Architecture params
 ## Architecture suffix params: horizon
 chunk_size: 50
