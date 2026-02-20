@@ -428,6 +428,39 @@ def prepare_data_for_accuracy_test(
     normalization_parameters: dict,
     noise: torch.Tensor,
 ) -> None:
+    dataloader_test = instantiate(cfg.datamodule)
+    w, h = 512, 512
+    stats = torch.zeros((len(dataloader_test), 3), dtype=torch.float16, device="cuda")
+    for step, elem in tqdm(enumerate(dataloader_test)):
+        batch = __getbatch__(elem)
+        for k, v in batch.items():
+            if isinstance(v, torch.Tensor):
+                if v.dtype != dtype:
+                    batch[k] = v.to(dtype)
+                batch[k] = batch[k].to(device)
+        batch.pop("meta/ImageMetadata.cam_front_left/time_stamp", None)
+        batch[OBS_IMAGE] = resize_with_pad(
+            torch.reshape(batch[OBS_IMAGE], (-1, *batch[OBS_IMAGE].shape[-3:])),
+            w,
+            h,
+            pad_value=0,
+        ).reshape((
+            *batch[OBS_IMAGE].shape[:-2],
+            w,
+            h,
+        ))
+        # Siglip normalization
+        batch[OBS_IMAGE] *= 2.0
+        batch[OBS_IMAGE] -= 1.0
+        wp_before = batch[OBS_STATE][0, -1, ...].clone()
+        a = wp_before.reshape(10, 2)
+        d = a[1:, :] - a[:-1, :]
+        norms = d.norm(dim=1)
+        stats[step, ...] = torch.tensor([norms.median(), norms.min(), norms.max()])
+        _normalize_state(normalization_parameters, batch)
+        wp = batch[OBS_STATE]
+        print("Step")
+    print("Done")
     return
 
     def torch_dtype_to_numpy(torch_dtype):
