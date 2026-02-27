@@ -209,21 +209,11 @@ class ExportEmbeddingModelIncremental(torch.nn.Module):
                     ...,
                 ],
                 # waypoints / intent
-                prefix_embs_cache[
-                    :,
-                    self.num_tokens[0] * self.context_length  # images
-                    + self.num_tokens[1]  # language
-                    + self.num_tokens[2] : self.num_tokens[0]
-                    * self.context_length  # images
-                    + self.num_tokens[1]  # language
-                    + self.num_tokens[2] * self.context_length,  # intent
-                    ...,
-                ],
                 prefix_embs[
                     :,
                     -self.num_tokens[-2] - self.num_tokens[-1] : -self.num_tokens[-1],
                     ...,
-                ],
+                ].expand(-1, self.context_length, -1),
                 # state / speed
                 prefix_embs_cache[
                     :,
@@ -1024,7 +1014,6 @@ def export_dynamo(cfg: DictConfig) -> None:  # noqa: PLR0914
         wandb_logger,
     )
     logging.info("Exported the action model")  # noqa: LOG015
-
     args_full = (batch_model, lang_emb.clone(), lang_masks.clone(), noise.clone())
 
     prefix_embs, prefix_pad_masks, prefix_att_masks = export_model_full(
