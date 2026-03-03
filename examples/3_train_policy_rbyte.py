@@ -27,13 +27,17 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import hydra
+import torch
 from hydra.utils import instantiate
 
 from lerobot.configs.default import DatasetConfig
 from lerobot.configs.train import TrainPipelineConfig
 from lerobot.configs.types import FeatureType, PolicyFeature
 from lerobot.policies.smolvla.configuration_smolvla import SmolVLAConfig
-from lerobot.policies.smolvla.conversion_utils_yaak import load_dataset_stats
+from lerobot.policies.smolvla.conversion_utils_yaak import (
+    MuLawScaler,
+    load_dataset_stats,
+)
 from lerobot.scripts.train_yaak import train
 from lerobot.utils.random_utils import set_seed
 from lerobot.utils.utils import init_logging
@@ -146,6 +150,19 @@ def _train_smolvla_rbyte(hydra_cfg: DictConfig) -> None:
     init_logging()
 
     dataset_stats = load_dataset_stats(hydra_cfg.paths.lerobot_stats)
+
+    # Apply MuLaw scaling to the steering angle dimension of action.continuous stats
+    # so that normalization bounds match the scaled values in the dataset pipeline.
+    # Steering is index 2 in action.continuous: [gas, brake, steering].
+    # MuLaw is monotone so min/max/q01/q99 transform element-wise.
+    if hydra_cfg.model.use_mulaw_steering_scaling:
+        mulaw = MuLawScaler(mu=hydra_cfg.model.mulaw_mu)
+        steering_dim = 2
+        for stat_key in ["min", "max", "q01", "q99"]:
+            val = float(dataset_stats["action.continuous"][stat_key][steering_dim])
+            dataset_stats["action.continuous"][stat_key][steering_dim] = (
+                mulaw.transform(torch.tensor([val])).item()
+            )
 
     # Substitute min-max normalization with quantile normalization if specified
     if hydra_cfg.normalization.quantile_normalization.use_quantiles_instead_of_min_max:

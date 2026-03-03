@@ -32,6 +32,9 @@ freeze_vision_encoder: True
 # Loss params
 use_masked_loss: False
 use_acc_loss: False
+# Steering scaling params
+use_mulaw_steering_scaling: True
+mulaw_mu: 255.0
 # Logging params
 log_freq: 50
 eval_freq: 10000

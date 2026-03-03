@@ -65,6 +65,7 @@ from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.policies.smolvla.conversion_utils_yaak import (
     __getbatch__,
     load_dataset_stats,
+    unscale_steering_action,
 )
 from lerobot.policies.utils import get_device_from_parameters
 from lerobot.utils.logging_utils import AverageMeter, MetricsTracker
@@ -147,7 +148,9 @@ def eval_policy_yaak_loop(
             if cur_bsize != bsize:
                 noise = noise_row.repeat(cur_bsize, 1, 1)
             pred_actions[step * bsize : step * bsize + cur_bsize, :] = (
-                policy.predict_action_chunk(batch, noise=noise.clone())[:, 0, :]
+                unscale_steering_action(
+                    policy.predict_action_chunk(batch, noise=noise.clone())[:, 0, :]
+                )
             )
         eval_tracker.eval_loss = loss.item()
         eval_tracker.eval_update_s = time.perf_counter() - start_time
