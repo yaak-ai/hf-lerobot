@@ -993,7 +993,10 @@ samples:
                 ("meta/VehicleMotion/speed")[51] AS "observation.state.vehicle",
                 list_slice("meta/VehicleMotion/gas_pedal_normalized"::FLOAT[101],  52, 101, 1) AS "meta/VehicleMotion/gas_pedal_normalized",
                 list_slice("meta/VehicleMotion/brake_pedal_normalized"::FLOAT[101],  52, 101, 1) AS "meta/VehicleMotion/brake_pedal_normalized",
-                list_slice("meta/VehicleMotion/steering_angle_normalized"::FLOAT[101],  52, 101, 1) AS "meta/VehicleMotion/steering_angle_normalized",
+                list_transform(
+                    list_slice("meta/VehicleMotion/steering_angle_normalized"::FLOAT[101],  52, 101, 1),
+                    x -> sign(x) * ln(1.0 + 255.0 * abs(x)) / ln(256.0)
+                ) AS "meta/VehicleMotion/steering_angle_normalized",
                 flatten(("waypoints/xy_normalized"::FLOAT[2][10][101])[51]) AS "observation.state.waypoints",
                 'Given the waypoints and current vehicle speed, follow the waypoints while adhering to traffic rules and regulations' as "task"
             FROM

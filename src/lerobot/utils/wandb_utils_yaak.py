@@ -1,15 +1,10 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import matplotlib.pyplot as plt
 import numpy as np
 import polars as pl
 import torch
 from wandb import Image
-
-if TYPE_CHECKING:
-    from torch import Tensor
 
 
 def _get_nnz_actions(gt_actions):
@@ -156,6 +151,13 @@ def _plot_losses_callback(
     caption: str | None = None,
 ) -> Image:
     """Plot the losses and actions over time for each action dimension."""
+    if gt_actions is not None:
+        mu = 255.0
+        steering = np.clip(gt_actions[:, 2], -1.0, 1.0)
+        gt_actions = gt_actions.copy()
+        gt_actions[:, 2] = (
+            np.sign(steering) * np.expm1(np.abs(steering) * np.log1p(mu)) / mu
+        )
     action_dim = loss_accumulator.shape[-1]
     n_rows = 1 + int(gt_actions is not None)
     fig_nnz, ax_nnz = plt.subplots(action_dim * n_rows, 1, figsize=(20, 20))
