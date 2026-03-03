@@ -38,5 +38,5 @@ mulaw_mu: 255.0
 # Logging params
 log_freq: 50
 eval_freq: 10000
-train_run: train_smolvla_single_speed
+train_run: train_smolvla_single_speed_mu_law_255
 
