@@ -24,6 +24,7 @@ from lerobot.scripts.export_onnx import (
     prepare_model_data,
     update_episode_for_policy,
 )
+from lerobot.scripts.pentest_steering import plot_steering_angle
 from lerobot.utils.reye_utils import create_reye_df
 from lerobot.utils.utils import init_logging
 
@@ -74,6 +75,9 @@ def prepare_data_for_accuracy_test(
     real_actions = torch.zeros(
         (len(dataloader_test), 3), dtype=torch.float32, device=device
     )
+    gt_actions = torch.zeros(
+        (len(dataloader_test), 3), dtype=torch.float32, device=device
+    )
     images = []
     for step, elem in tqdm(enumerate(dataloader_test)):
         images.append(
@@ -103,6 +107,22 @@ def prepare_data_for_accuracy_test(
         real_actions[step, ...] = _eval_prod_models(
             policy_emb, policy_action, policy_emb_inc, batch, noise.clone()
         )
+        gt_actions[step, ...] = batch[ACTION][0, 0, ...]
+
+    # plot steering angles
+    delta_dir = Path("tmp/debug_steering/gt_vs_pred_angles")
+    delta_dir.mkdir(parents=True, exist_ok=True)
+    real_actions_per_step = real_actions[:, None, -1].permute(1, 0)  # (N_samples, N_steps)
+    plot_steering_angle(
+        real_actions_per_step,
+        delta_dir,
+        angles_as_x=False,
+        plot_all_images=True,
+        images=images,
+        gt_actions=gt_actions.cpu().numpy(),
+    )
+    torch.save(real_actions, delta_dir / "real_actions.pt")
+    exit(0)
 
     drive = dataloader_test.dataset.samples["__input_id"][0]
     delta_dir = Path(f"tmp/debug_steering/gt_angles/{drive}")
