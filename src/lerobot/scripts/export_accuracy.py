@@ -110,7 +110,8 @@ def prepare_data_for_accuracy_test(
         gt_actions[step, ...] = batch[ACTION][0, 0, ...]
 
     # plot steering angles
-    delta_dir = Path("tmp/debug_steering/gt_vs_pred_angles")
+    drive = dataloader_test.dataset.samples["__input_id"][0]
+    delta_dir = Path(f"tmp/debug_steering/gt_vs_pred_angles/{drive}")
     delta_dir.mkdir(parents=True, exist_ok=True)
     real_actions_per_step = real_actions[:, None, -1].permute(1, 0)  # (N_samples, N_steps)
     plot_steering_angle(
@@ -123,10 +124,6 @@ def prepare_data_for_accuracy_test(
     )
     torch.save(real_actions, delta_dir / "real_actions.pt")
     exit(0)
-
-    drive = dataloader_test.dataset.samples["__input_id"][0]
-    delta_dir = Path(f"tmp/debug_steering/gt_angles/{drive}")
-    delta_dir.mkdir(parents=True, exist_ok=True)
 
     # reye serialization
     # Handle cases with clip and without clip based on the timestamp
