@@ -40,8 +40,16 @@ convert *ARGS: generate-config
         --config-path {{ justfile_directory() }}/rbyte/config \
         --config-name train.yaml {{ ARGS }}
 
-export-onnx *ARGS:
+export-onnx *ARGS: generate-config
     uv run src/lerobot/scripts/export_onnx.py \
         --config-path {{ justfile_directory() }}/rbyte/config \
         --config-name export/onnx.yaml \
+        datamodule.batch_size=1 \
+        {{ ARGS }}
+
+export-accuracy *ARGS: generate-config
+    uv run src/lerobot/scripts/export_accuracy.py \
+        --config-path {{ justfile_directory() }}/rbyte/config \
+        --config-name export/onnx.yaml \
+        datamodule.batch_size=1 \
         {{ ARGS }}

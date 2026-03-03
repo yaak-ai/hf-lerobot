@@ -1,18 +1,14 @@
-import datetime
 import logging
 import math
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import hydra
-import numpy as np
-import onnxruntime as ort
 import pytest
 import torch
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from torch import nn
-from tqdm import tqdm
 
 from lerobot.configs.train import TrainPipelineConfig
 from lerobot.configs.types import FeatureType, NormalizationMode
@@ -25,7 +21,6 @@ from lerobot.policies.smolvla.modeling_smolvlm import (
     ExportSmolVLMVisionTransformer,
 )
 from lerobot.policies.utils import get_device_from_parameters
-from lerobot.utils.reye_utils import create_reye_df
 from lerobot.utils.utils import init_logging
 from lerobot.utils.wandb_utils import WandBLogger
 
@@ -408,241 +403,6 @@ def update_episode_for_policy(
     return lang_emb, lang_masks, noise
 
 
-def prepare_data_for_accuracy_test(
-    cfg: DictConfig,
-    device: torch.device,
-    dtype: torch.dtype,
-    policy_vla: PreTrainedPolicy,
-    lang_emb: torch.Tensor,
-    lang_masks: torch.Tensor,
-    normalization_parameters: dict,
-    noise: torch.Tensor,
-) -> None:
-    dataloader_test = instantiate(cfg.datamodule)
-    w, h = 512, 512
-    stats = torch.zeros((len(dataloader_test), 3), dtype=torch.float16, device="cuda")
-    for step, elem in tqdm(enumerate(dataloader_test)):
-        batch = __getbatch__(elem)
-        for k, v in batch.items():
-            if isinstance(v, torch.Tensor):
-                if v.dtype != dtype:
-                    batch[k] = v.to(dtype)
-                batch[k] = batch[k].to(device)
-        batch.pop("meta/ImageMetadata.cam_front_left/time_stamp", None)
-        batch[OBS_IMAGE] = resize_with_pad(
-            torch.reshape(batch[OBS_IMAGE], (-1, *batch[OBS_IMAGE].shape[-3:])),
-            w,
-            h,
-            pad_value=0,
-        ).reshape((
-            *batch[OBS_IMAGE].shape[:-2],
-            w,
-            h,
-        ))
-        # Siglip normalization
-        batch[OBS_IMAGE] *= 2.0
-        batch[OBS_IMAGE] -= 1.0
-        wp_before = batch[OBS_STATE][0, -1, ...].clone()
-        a = wp_before.reshape(10, 2)
-        d = a[1:, :] - a[:-1, :]
-        norms = d.norm(dim=1)
-        stats[step, ...] = torch.tensor([norms.median(), norms.min(), norms.max()])
-        _normalize_state(normalization_parameters, batch)
-        wp = batch[OBS_STATE]
-        print("Step")
-    print("Done")
-    return
-
-    def torch_dtype_to_numpy(torch_dtype):
-        mapping = {
-            torch.float32: np.float32,
-            torch.float16: np.float16,
-            torch.float64: np.float64,
-            torch.int32: np.int32,
-            torch.int64: np.int64,
-            torch.int8: np.int8,
-            torch.uint8: np.uint8,
-            torch.bool: np.bool_,
-        }
-        return mapping.get(torch_dtype, np.float32)
-
-    dataloader_test = instantiate(cfg.datamodule)
-    w, h = 512, 512
-    # policy_dual = ExportDualModel(policy_vla, lang_emb, lang_masks, 3)
-    policy_emb = ExportEmbeddingModelFull(policy_vla, lang_emb, lang_masks)
-    policy_action = ExportActionModelIncremental(policy_vla, 3)
-
-    pred_actions = torch.zeros(
-        (len(dataloader_test.dataset), 3), dtype=dtype, device=device
-    )
-    onnx_actions = np.zeros(
-        (len(dataloader_test.dataset), 3), dtype=torch_dtype_to_numpy(dtype)
-    )
-    emb_onnx_path = Path("outputs/2026-01-27/16-03-51/vision/embedding_dynamic.onnx")
-    onnx_path = Path("outputs/2026-01-27/16-03-51/action/action3.onnx")
-    noise_cpu = noise.clone().cpu()
-    collected_data = []
-    session = ort.InferenceSession(onnx_path)
-    session_emb = ort.InferenceSession(emb_onnx_path)
-    for step, elem in tqdm(enumerate(dataloader_test)):
-        batch = __getbatch__(elem)
-        for k, v in batch.items():
-            if isinstance(v, torch.Tensor):
-                if v.dtype != dtype:
-                    batch[k] = v.to(dtype)
-                batch[k] = batch[k].to(device)
-        batch.pop("meta/ImageMetadata.cam_front_left/time_stamp", None)
-        batch[OBS_IMAGE] = resize_with_pad(
-            torch.reshape(batch[OBS_IMAGE], (-1, *batch[OBS_IMAGE].shape[-3:])),
-            w,
-            h,
-            pad_value=0,
-        ).reshape((
-            *batch[OBS_IMAGE].shape[:-2],
-            w,
-            h,
-        ))
-        # Siglip normalization
-        batch[OBS_IMAGE] *= 2.0
-        batch[OBS_IMAGE] -= 1.0
-
-        _normalize_state(normalization_parameters, batch)
-
-        # task = batch.pop("task")  # noqa: ERA001
-        with torch.inference_mode(), pytest.MonkeyPatch.context() as m:
-            m.setattr("torch.compiler._is_exporting_flag", True)
-            # result = policy_dual(batch, noise.clone())  # noqa: ERA001
-            # prefix_embs, prefix_pad_masks, prefix_att_masks = policy_emb(batch)  # noqa: E501, ERA001
-            prefix_embs, prefix_pad_masks, prefix_att_masks = policy_emb({
-                OBS_IMAGE: batch[OBS_IMAGE].clone(),
-                OBS_STATE_VEHICLE: batch[OBS_STATE_VEHICLE].clone(),
-                OBS_STATE: batch[OBS_STATE].clone(),
-            })
-
-            # prefix_embs_onnx, prefix_pad_masks_onnx, prefix_att_masks_onnx = (
-            #     session_emb.run(
-            #         None,
-            #         {
-            #             "batch_observation_images_front_left": batch[OBS_IMAGE]
-            #             .clone()
-            #             .cpu()
-            #             .numpy(),
-            #             "batch_observation_state_vehicle": batch[OBS_STATE_VEHICLE]
-            #             .clone()
-            #             .cpu()
-            #             .numpy(),
-            #             "batch_observation_state_waypoints": batch[OBS_STATE]
-            #             .clone()
-            #             .cpu()
-            #             .numpy(),
-            #         },
-            #     )
-            # )
-
-            actions_onnx = session.run(
-                None,
-                {
-                    "prefix_embs": prefix_embs.clone().cpu().numpy(),
-                    "prefix_pad_masks": prefix_pad_masks.clone().cpu().numpy(),
-                    "prefix_att_masks": prefix_att_masks.clone().cpu().numpy(),
-                    "noise": noise.clone().cpu().numpy(),
-                },
-            )
-            actions = policy_action(
-                prefix_embs.clone(),
-                prefix_pad_masks.clone(),
-                prefix_att_masks.clone(),
-                noise.clone(),
-            )
-            pred_actions[step, ...] = actions[0, 0, ...]
-            onnx_actions[step, ...] = actions_onnx[0][0, 0, ...]
-        # embs_cpu = prefix_embs.cpu().numpy()
-        # embedding_error = (
-        #     prefix_embs_onnx[0, : 64 * 6, ...] - embs_cpu[0, : 64 * 6, ...]
-        # ).flatten()
-        # state_lang_error = np.sum(
-        #     np.abs(prefix_embs_onnx[0, 64 * 6 :, ...] - embs_cpu[0, 64 * 6 :, ...])
-        # )
-        # action_error = np.abs(
-        #     actions_onnx[0][0, 0, ...] - actions[0, 0, ...].cpu().numpy()
-        # )
-        # logging.info(f"Action error {action_error}")  # noqa: G004, LOG015
-        # logging.info(  # noqa: LOG015
-        #     f"Vision error [{np.max(embedding_error)}, {np.median(embedding_error)}, {embedding_error.min()}], S={np.sum(np.abs(embedding_error))}"  # noqa: E501, G004
-        # )
-        # logging.info(f"State lang error {state_lang_error}")  # noqa: G004, LOG015
-        # action_error_horizon = np.abs((actions_onnx[0][0, :4, ...] - actions[0, :4, ...].cpu().numpy()))  # noqa: ERA001
-        # logging.info(f"Action error horizon {action_error_horizon}")  # noqa: ERA001
-        # Collect batch and noise, moving to CPU for portability
-        batch_cpu = {
-            k: v.cpu() if isinstance(v, torch.Tensor) else v for k, v in batch.items()
-        }
-        collected_data.append({
-            "batch": batch_cpu,
-            "prefix_embs": prefix_embs.cpu(),
-            "prefix_pad_masks": prefix_pad_masks.cpu(),
-            "prefix_att_masks": prefix_att_masks.cpu(),
-            "actions": actions.cpu(),
-        })
-    # Serialize collected data to file
-    output_path = Path(cfg.artifacts_dir) / "accuracy_test_data.pt"
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    torch.save(
-        {
-            "data": collected_data,
-            "noise": noise_cpu,
-            "lang_emb": lang_emb.cpu(),
-            "lang_masks": lang_masks.cpu(),
-            "metadata": {
-                "dtype": str(dtype),
-                "device": str(device),
-                "num_batches": len(collected_data),
-                "image_size": (w, h),
-                "chunk_size": policy_vla.config.chunk_size,
-                "max_action_dim": policy_vla.config.max_action_dim,
-            },
-        },
-        output_path,
-    )
-
-    logging.info(f"Saved {len(collected_data)} batches to {output_path}")  # noqa: G004, LOG015
-
-    # reye serialization
-    # Handle cases with clip and without clip based on the timestamp
-    ts = dataloader_test.dataset.samples[
-        "meta/ImageMetadata.cam_front_left/time_stamp"
-    ][0]
-    df = create_reye_df(
-        dataloader_test,
-        pred_actions.cpu(),
-        is_without_clip=isinstance(ts, datetime.datetime),
-    )
-    reye_torch = Path(cfg.reye_torch)
-    reye_torch.mkdir(parents=True, exist_ok=True)
-    reye_path = reye_torch / "results.parquet"
-    df.write_parquet(reye_path)
-
-    df_onnx = create_reye_df(
-        dataloader_test, onnx_actions, is_without_clip=isinstance(ts, datetime.datetime)
-    )
-    reye_onnx = Path(cfg.reye_onnx)
-    reye_onnx.mkdir(parents=True, exist_ok=True)
-    reye_path = reye_onnx / "results.parquet"
-    df_onnx.write_parquet(reye_path)
-
-    delta_input = Path(cfg.artifacts_dir) / "samples.parquet"
-    dataloader_test.dataset.samples.write_parquet(delta_input)
-
-    logging.info(f"""
-    cd delta_accuracy
-    rsync -av valentina@berghain:{output_path.resolve()} .
-    rsync -av {output_path.name} valentina@delta:/home/valentina/data
-    rsync -av valentina@berghain:{delta_input.resolve()} .
-    rsync -av {delta_input.name} valentina@delta:/home/valentina/data
-    rsync -av {delta_input.name} nvidia@delta-emc1:/home/nvidia/accuracy
-    """)  # noqa: G004, LOG015
-
 
 def prepare_model_data(cfg: DictConfig, dtype: torch.dtype) -> None:
     logging.debug("instantiating policy")  # noqa: LOG015
@@ -948,17 +708,6 @@ def export_dynamo(cfg: DictConfig) -> None:  # noqa: PLR0914
         torch.device(cfg.device),
         dtype,
         normalization_parameters,
-    )
-
-    prepare_data_for_accuracy_test(
-        cfg,
-        torch.device(cfg.device),
-        dtype,
-        policy_vla,
-        lang_emb,
-        lang_masks,
-        normalization_parameters,
-        noise,
     )
 
     args_embedding = (batch, lang_emb.clone(), lang_masks.clone())
