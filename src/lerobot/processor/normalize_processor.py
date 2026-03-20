@@ -25,6 +25,7 @@ import torch
 from torch import Tensor
 
 from lerobot.configs.types import FeatureType, NormalizationMode, PipelineFeatureType, PolicyFeature
+from lerobot.constants_yaak import OBS_STATE_VEHICLE
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from lerobot.utils.constants import ACTION
 
@@ -32,6 +33,11 @@ from .converters import from_tensor_to_numpy, to_tensor
 from .core import EnvTransition, PolicyAction, TransitionKey
 from .pipeline import PolicyProcessorPipeline, ProcessorStep, ProcessorStepRegistry, RobotObservation
 
+
+def patch_norm_mode(norm_mode: NormalizationMode, key: str) -> NormalizationMode:
+    # Monkey patch for the case where different STATE features have
+    # different normalization modes
+    return NormalizationMode.ZERO_ONE if key == OBS_STATE_VEHICLE else norm_mode
 
 @dataclass
 class _NormalizationMixin:
@@ -306,11 +312,14 @@ class _NormalizationMixin:
         if norm_mode == NormalizationMode.IDENTITY or key not in self._tensor_stats:
             return tensor
 
+        norm_mode = patch_norm_mode(norm_mode, key)
+
         if norm_mode not in (
             NormalizationMode.MEAN_STD,
             NormalizationMode.MIN_MAX,
             NormalizationMode.QUANTILES,
             NormalizationMode.QUANTILE10,
+            NormalizationMode.ZERO_ONE,
         ):
             raise ValueError(f"Unsupported normalization mode: {norm_mode}")
 
@@ -358,6 +367,28 @@ class _NormalizationMixin:
                 return (tensor + 1) / 2 * denom + min_val
             # Map from [min, max] to [-1, 1]
             return 2 * (tensor - min_val) / denom - 1
+
+        if norm_mode == NormalizationMode.ZERO_ONE:
+            min_val = stats.get("min", None)
+            max_val = stats.get("max", None)
+            if min_val is None or max_val is None:
+                raise ValueError(
+                    "ZERO_ONE normalization mode requires min and max stats, please update the dataset with the correct stats"
+                )
+
+            min_val, max_val = stats["min"], stats["max"]
+            denom = max_val - min_val
+            # When min_val == max_val, substitute the denominator with a small epsilon
+            # to prevent division by zero. This consistently maps an input equal to
+            # min_val to 0, ensuring a stable transformation.
+            denom = torch.where(
+                denom == 0, torch.tensor(self.eps, device=tensor.device, dtype=tensor.dtype), denom
+            )
+            if inverse:
+                # Map from [0, 1] back to [min, max]
+                return tensor * denom + min_val
+            # Map from [min, max] to [0, 1]
+            return (tensor - min_val) / denom
 
         if norm_mode == NormalizationMode.QUANTILES:
             q01 = stats.get("q01", None)

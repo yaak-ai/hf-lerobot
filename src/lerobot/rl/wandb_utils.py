@@ -21,6 +21,7 @@ from pathlib import Path
 
 from huggingface_hub.constants import SAFETENSORS_SINGLE_FILE
 from termcolor import colored
+from wandb import Image
 
 from lerobot.configs.train import TrainPipelineConfig
 from lerobot.utils.constants import PRETRAINED_MODEL_DIR
@@ -201,3 +202,9 @@ class WandBLogger:
 
         wandb_video = self._wandb.Video(video_path, fps=self.env_fps, format="mp4")
         self._wandb.log({f"{mode}/video": wandb_video}, step=step)
+
+    def log_image(self, log_image: Image, step: int, mode: str = "train"):
+        if mode not in {"train", "eval"}:
+            raise ValueError(mode)
+
+        self._wandb.log({f"{mode}/image_{log_image._caption}": log_image}, step=step)  # noqa: SLF001

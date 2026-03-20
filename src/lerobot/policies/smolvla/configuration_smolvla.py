@@ -109,6 +109,14 @@ class SmolVLAConfig(PreTrainedConfig):
     compile_model: bool = False  # Whether to use torch.compile for model optimization
     compile_mode: str = "max-autotune"  # Torch compile mode
 
+    # Yaak-specific options (used only by yaak training pipeline)
+    use_context: bool = False
+    use_separate_intent: bool = False
+    max_intent_dim: int = 32
+    use_image_norm: int = 1  # 0: no normalization, 1: scale by sqrt(d), 2: L2 normalize
+    use_masked_loss: bool = False
+    use_acc_loss: bool = False
+
     def __post_init__(self):
         super().__post_init__()
 

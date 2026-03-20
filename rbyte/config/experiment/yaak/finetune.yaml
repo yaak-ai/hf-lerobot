@@ -1,0 +1,15 @@
+# @package _global_
+
+defaults:
+
+  - /datamodule: yaak/train
+  - /datamodule_val: yaak/val
+  - /paths: yaak/default
+  - /normalization: original
+  - /model: smolvla_train
+  - _self_
+
+embedding_dim: 512
+
+
+

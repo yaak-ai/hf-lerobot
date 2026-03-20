@@ -1,0 +1,5 @@
+# @package _global_
+
+defaults:
+  - inference: yaak/default
+  - _self_

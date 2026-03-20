@@ -1,0 +1,12 @@
+visual:
+  _target_: lerobot.configs.types.NormalizationMode
+  _args_: ["IDENTITY"]
+action:
+  _target_: lerobot.configs.types.NormalizationMode
+  _args_: ["MIN_MAX"]
+state:
+  _target_: lerobot.configs.types.NormalizationMode
+  _args_: ["MIN_MAX"]
+quantile_normalization:
+  use_quantiles_instead_of_min_max: false
+  quantile_keys_dims: ???
