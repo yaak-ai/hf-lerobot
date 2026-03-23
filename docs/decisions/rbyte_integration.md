@@ -1,4 +1,4 @@
-# Architectural decisions: rbyte sataset Integration
+# Architectural decisions: rbyte dataset integration
 
 ## How to Run (from `justfile`)
 
