@@ -75,7 +75,6 @@ dependencies = [
     "pynput>=1.7.7,<1.9.0",
     "pyserial>=3.5,<4.0",
     "wandb>=0.24.0,<0.25.0",
-
     "torch>=2.2.1,<2.9.0", # TODO: Bump dependency
     "torchcodec>=0.2.1,<0.11.0; sys_platform != 'win32' and (sys_platform != 'linux' or (platform_machine != 'aarch64' and platform_machine != 'arm64' and platform_machine != 'armv7l')) and (sys_platform != 'darwin' or platform_machine != 'x86_64')", # TODO: Bump dependency
     "torchvision>=0.21.0,<0.26.0", # TODO: Bump dependency
@@ -156,6 +155,13 @@ hilserl = ["lerobot[transformers-dep]", "gym-hil>=0.1.13,<0.2.0", "lerobot[grpci
 # Features
 async = ["lerobot[grpcio-dep]", "matplotlib>=3.10.3,<4.0.0"]
 peft = ["lerobot[transformers-dep]", "peft>=0.18.0,<1.0.0"]
+
+# Export
+export = [
+  "onnx>=1.19.1",
+  "onnxruntime>=1.23.1",
+  "onnxscript>=0.5.3",
+]
 
 # Development
 dev = ["pre-commit>=3.7.0,<5.0.0", "debugpy>=1.8.1,<1.9.0", "lerobot[grpcio-dep]", "grpcio-tools==1.73.1", "mypy>=1.19.1"]

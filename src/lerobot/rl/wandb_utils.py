@@ -208,3 +208,87 @@ class WandBLogger:
             raise ValueError(mode)
 
         self._wandb.log({f"{mode}/image_{log_image._caption}": log_image}, step=step)  # noqa: SLF001
+
+    def log_onnx(self, checkpoint_dir: Path) -> dict[str, str]:
+        """Logs ONNX / dynamo / markdown export artifacts to wandb.
+
+        Returns:
+            Dict mapping artifact kind ("onnx", "dynamo") to their artifact ref
+            strings (e.g. "name:latest"), for callers to persist to the run summary
+            or command line. Keys are absent when the corresponding file is not found
+            or artifacts are disabled.
+        """
+        refs: dict[str, str] = {}
+
+        if self.cfg.disable_artifact:
+            return refs
+
+        step_id = checkpoint_dir.name
+        artifact_group = f"{self._group}-{step_id}"
+
+        if onnx_models := list(checkpoint_dir.glob("*.onnx")):
+            model = onnx_models[0]
+            artifact_name = get_safe_wandb_artifact_name(f"{artifact_group}-onnx")
+            artifact = self._wandb.Artifact(artifact_name, type="model")
+            artifact.add_file(model)
+            self._wandb.log_artifact(artifact)
+            refs["onnx"] = f"{artifact_name}:latest"
+        else:
+            logging.info(f"No ONNX model to log on: {checkpoint_dir}")  # noqa: G004, LOG015
+
+        if pt2_models := list(checkpoint_dir.glob("*.pt2")):
+            model = pt2_models[0]
+            artifact_name = get_safe_wandb_artifact_name(f"{artifact_group}-dynamo")
+            artifact = self._wandb.Artifact(artifact_name, type="model")
+            artifact.add_file(model)
+            self._wandb.log_artifact(artifact)
+            refs["dynamo"] = f"{artifact_name}:latest"
+        else:
+            logging.info(f"No dynamo model to log on: {checkpoint_dir}")  # noqa: G004, LOG015
+
+        if md_files := list(checkpoint_dir.glob("*.md")):
+            model = md_files[0]
+            artifact_name = get_safe_wandb_artifact_name(f"{artifact_group}-log")
+            artifact = self._wandb.Artifact(artifact_name, type="documentation")
+            artifact.add_file(model)
+            self._wandb.log_artifact(artifact)
+            with model.open("r") as f:
+                self._wandb.run.summary["log_file"] = f.read()
+        else:
+            logging.info(f"No export log to log on: {checkpoint_dir}")  # noqa: G004, LOG015
+
+        return refs
+
+    def log_pt(self, artifacts_dir: Path, artifact_label: str) -> str | None:
+        """Logs a PyTorch .pt checkpoint to wandb.
+
+        Args:
+            artifacts_dir: Directory containing the .pt file.
+            artifact_label: Label prefix used to match the file (e.g. "embedding_full",
+                "embedding_inc", "action") and to name the WandB artifact.
+
+        Returns:
+            The artifact name string (e.g. "name:latest") that can be passed to
+            `load_from_wandb_export`, or None if artifacts are disabled or no file found.
+        """
+        if self.cfg.disable_artifact:
+            return None
+
+        step_id = artifacts_dir.name
+        artifact_group = f"{self._group}-{step_id}"
+
+        pt_files = list(artifacts_dir.glob(f"{artifact_label}*.pt"))
+        if pt_files:
+            pt_file = pt_files[0]
+            artifact_name = get_safe_wandb_artifact_name(f"{artifact_group}-{artifact_label}-pt")
+            artifact = self._wandb.Artifact(artifact_name, type="model")
+            artifact.add_file(pt_file)
+            # Include all JSON config files so from_local can reconstruct the model
+            # (config.json for policy architecture, export_config.json for class-specific scalars).
+            for json_file in sorted(artifacts_dir.glob("*.json")):
+                artifact.add_file(json_file)
+            self._wandb.log_artifact(artifact)
+            return f"{artifact_name}:latest"
+        else:
+            logging.info(f"No .pt file matching '{artifact_label}' to log in {artifacts_dir}")  # noqa: G004, LOG015
+            return None

@@ -5,12 +5,13 @@ export TQDM_DISABLE := "1"
 export LEROBOT_TEST_DEVICE := "cuda"
 export CUDA_VISIBLE_DEVICES := "0"
 export HF_LEROBOT_HOME := "/nasa/3rd_party/lerobot"
+# export GIT_LFS_SKIP_SMUDGE := "1"
 
 _default:
     @just --list --unsorted
 
 sync:
-    uv sync --no-cache --extra dev --extra test --extra smolvla --extra yaak
+    uv sync --no-cache --extra dev --extra test --extra smolvla --extra yaak --extra export
 
 generate-config:
     ytt --file {{ justfile_directory() }}/rbyte/config/_templates/ \
@@ -39,3 +40,20 @@ rbyte2lerobot-stats *ARGS: generate-config
     uv run src/lerobot/policies/smolvla/conversion_utils_yaak.py \
         --config-path {{ justfile_directory() }}/rbyte/config \
         --config-name stat.yaml {{ ARGS }}
+
+test-transformers-compat:
+    uv run pytest tests/policies/smolvla/test_export_smolvlm.py -x --tb=short -q
+
+export-onnx *ARGS: generate-config test-transformers-compat
+    uv run src/lerobot/scripts/export_onnx.py \
+        --config-path {{ justfile_directory() }}/rbyte/config \
+        --config-name export/onnx.yaml \
+        datamodule.batch_size=1 \
+        {{ ARGS }}
+
+export-accuracy *ARGS: generate-config
+    uv run src/lerobot/scripts/export_accuracy.py \
+        --config-path {{ justfile_directory() }}/rbyte/config \
+        --config-name export/onnx.yaml \
+        datamodule.batch_size=1 \
+        {{ ARGS }}
