@@ -1,0 +1,9 @@
+# @package _global_
+
+---
+defaults:
+  - /paths: yaak/default
+  - /datamodule: yaak/train
+  - _self_
+
+seed: 1337
