@@ -5,7 +5,7 @@ export TQDM_DISABLE := "1"
 export LEROBOT_TEST_DEVICE := "cuda"
 export CUDA_VISIBLE_DEVICES := "0"
 export HF_LEROBOT_HOME := "/nasa/3rd_party/lerobot"
-# export GIT_LFS_SKIP_SMUDGE := "1"
+export GIT_LFS_SKIP_SMUDGE := "1"
 
 _default:
     @just --list --unsorted

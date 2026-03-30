@@ -29,7 +29,7 @@ version = "0.4.4"
 description = "🤗 LeRobot: State-of-the-art Machine Learning for Real-World Robotics in Pytorch"
 dynamic = ["readme"]
 license = { text = "Apache-2.0" }
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.10,<3.11"
 authors = [
     { name = "Rémi Cadène", email = "re.cadene@gmail.com" },
     { name = "Simon Alibert", email = "alibert.sim@gmail.com" },
@@ -136,7 +136,7 @@ wallx = [
 ]
 pi = ["transformers @ git+https://github.com/huggingface/transformers.git@fix/lerobot_openpi", "scipy>=1.10.1,<1.15"]
 smolvla = ["lerobot[transformers-dep]", "num2words>=0.5.14,<0.6.0", "accelerate>=1.7.0,<2.0.0", "safetensors>=0.4.3,<1.0.0"]
-yaak = ["rbyte[geo,jpeg,yaak]==0.30.0", "duckdb==1.4.1", "polars==1.33.1", "matplotlib>=3.9.0,<4.0.0"]
+yaak = ["rbyte[geo,jpeg,yaak] @ git+https://github.com/yaak-ai/rbyte.git@jetson-orin", "duckdb==1.4.1", "polars==1.33.1", "matplotlib>=3.9.0,<4.0.0"]
 groot = [
     "lerobot[transformers-dep]",
     "peft>=0.13.0,<1.0.0",
@@ -486,3 +486,18 @@ conflicts = [
         { extra = "all" },
     ],
 ]
+[tool.uv.sources]
+torch = [
+  { index = "pytorch-cpu", marker = "sys_platform != 'linux'" },
+  { index = "pytorch-cu128", marker = "sys_platform == 'linux'" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
