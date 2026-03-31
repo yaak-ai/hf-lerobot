@@ -76,7 +76,7 @@ dependencies = [
     "pyserial>=3.5,<4.0",
     "wandb>=0.24.0,<0.25.0",
 
-    "torch>=2.2.1,<2.11.0", # TODO: Bump dependency
+    "torch>=2.2.1,<2.9.0", # TODO: Bump dependency
     "torchcodec>=0.2.1,<0.11.0; sys_platform != 'win32' and (sys_platform != 'linux' or (platform_machine != 'aarch64' and platform_machine != 'arm64' and platform_machine != 'armv7l')) and (sys_platform != 'darwin' or platform_machine != 'x86_64')", # TODO: Bump dependency
     "torchvision>=0.21.0,<0.26.0", # TODO: Bump dependency
 
@@ -137,7 +137,7 @@ wallx = [
 ]
 pi = ["transformers @ git+https://github.com/huggingface/transformers.git@fix/lerobot_openpi", "scipy>=1.10.1,<1.15"]
 smolvla = ["lerobot[transformers-dep]", "num2words>=0.5.14,<0.6.0", "accelerate>=1.7.0,<2.0.0", "safetensors>=0.4.3,<1.0.0"]
-yaak = ["rbyte[geo,jpeg,yaak]==0.30.0", "duckdb>=1.2.2", "polars>=1.0.0", "matplotlib>=3.9.0,<4.0.0"]
+yaak = ["rbyte[geo,jpeg,yaak]==0.30.0", "duckdb==1.4.1", "polars==1.33.1", "matplotlib>=3.9.0,<4.0.0"]
 groot = [
     "lerobot[transformers-dep]",
     "peft>=0.13.0,<1.0.0",

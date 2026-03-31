@@ -54,7 +54,7 @@ samples:
     #@ for input_id in drives:
     (@=input_id@):
       yaak_metadata_path: ${paths.data}/(@=input_id@)/metadata.log
-      waypoints_path: ${paths.data}/(@=input_id@)/waypoints.json
+      waypoints_path: ${paths.data}/(@=input_id@)/waypoints_10m.json
       #@ for camera in cameras:
       (@=camera@)_path: ${paths.data}/(@=input_id@)/frames/(@=camera@).pii.mp4/576x324
       #@ end
